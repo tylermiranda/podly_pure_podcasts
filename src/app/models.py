@@ -53,6 +53,9 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
     # When Podly last successfully fetched this feed's RSS (UTC naive).
     # Null until the first successful fetch/refresh after the column was added.
     last_fetched_at = db.Column(db.DateTime, nullable=True)
+    # Per-feed custom prompt appended to the base LLM ad detection system prompt,
+    # null = no custom instructions (use base prompt only)
+    custom_llm_ad_prompt = db.Column(db.Text, nullable=True)
 
     posts = db.relationship(
         "Post", backref="feed", lazy=True, order_by="Post.release_date.desc()"

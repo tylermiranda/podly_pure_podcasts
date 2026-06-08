@@ -50,6 +50,9 @@ export default function FeedSettingsModal({
         : 'inherit'
   );
   const [languageOverride, setLanguageOverride] = useState(feed.language ?? '');
+  const [customLlmAdPrompt, setCustomLlmAdPrompt] = useState<string>(
+    feed.custom_llm_ad_prompt || ''
+  );
 
   useEffect(() => {
     setStrategy(feed.ad_detection_strategy || 'llm');
@@ -69,6 +72,7 @@ export default function FeedSettingsModal({
           : 'inherit'
     );
     setLanguageOverride(feed.language ?? '');
+    setCustomLlmAdPrompt(feed.custom_llm_ad_prompt || '');
   }, [feed, llmChapterFallbackGlobalDefault]);
 
   const updateMutation = useMutation({
@@ -124,6 +128,11 @@ export default function FeedSettingsModal({
 
     if (languageOverride !== currentLanguageOverride) {
       settings.language = languageOverride === '' ? null : languageOverride;
+    }
+
+    const currentCustomPrompt = feed.custom_llm_ad_prompt || '';
+    if (customLlmAdPrompt !== currentCustomPrompt) {
+      settings.custom_llm_ad_prompt = customLlmAdPrompt || null;
     }
 
     if (Object.keys(settings).length === 0) {
@@ -292,6 +301,24 @@ export default function FeedSettingsModal({
                 this setting is locked on.
               </p>
             )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Custom Ad Detection Instructions
+            </label>
+            <textarea
+              value={customLlmAdPrompt}
+              onChange={(e) => setCustomLlmAdPrompt(e.target.value)}
+              placeholder="e.g. Ads appear only in first 30 seconds of the podcast. If they are not detected in this initial segment, do not look any further and assume rest is ads free."
+              rows={4}
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Optional custom instructions appended to the LLM system prompt
+              for ad detection. Use this to guide the LLM based on your
+              podcast's specific ad patterns.
+            </p>
           </div>
 
           <div className="border-t border-gray-200" />
