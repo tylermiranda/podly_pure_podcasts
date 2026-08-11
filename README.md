@@ -15,7 +15,9 @@
 
 Podly uses Whisper and Chat GPT to remove ads from podcasts.
 
-<img width="100%" src="docs/images/screenshot.png" />
+<img width="100%" src="docs/images/screenshot.png" alt="Podly home: feed list with prompt tags and client/upstream freshness, plus feed detail" />
+
+<p align="center"><em>Feed list shows prompt-tag badges and <code>Last fetched … via {client}</code>; detail shows upstream RSS freshness and the assigned tag.</em></p>
 
 ## This fork
 
@@ -39,6 +41,14 @@ ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
 **Why the cut defaults matter:** a 3s fade leaves audible ad bleed at every cut; a 14s minimum length drops short prerolls. Prefer `fade_ms=0` and a lower length threshold when ads still play after processing. For host-read / network-specific patterns (e.g. Wondery / Noiser), assign a prompt tag or set a custom prompt on that feed and reprocess.
 
 ### Prompt tags (examples)
+
+<img width="100%" src="docs/images/screenshot-prompt-tags.png" alt="Config → Default → Prompt Tags manager with creator tags and prompts" />
+
+<p align="center"><em>Create reusable tags under <strong>Config → Default → Prompt Tags</strong> (e.g. <code>wondery</code>, <code>noiser</code>, <code>acquired</code>).</em></p>
+
+<img width="80%" src="docs/images/screenshot-feed-settings.png" alt="Feed Settings with Prompt tag and Custom Ad Detection Instructions" />
+
+<p align="center"><em>Assign one tag per feed in <strong>Feed Settings</strong>; optional per-feed custom instructions append after the tag prompt.</em></p>
 
 Create tags once under **Config → Default → Prompt Tags** (or **Manage tags** from Feed Settings / Add Feed), then assign **one tag per feed**. At classify time Podly builds the LLM instructions as:
 
