@@ -19,6 +19,7 @@ import type {
   CostSummary,
   CallLog,
   FeedSubscribersResponse,
+  PromptTag,
 } from '../types';
 
 const API_BASE_URL = '';
@@ -557,6 +558,31 @@ export const feedsApi = {
 
   getAggregateFeedLink: async (): Promise<{ url: string }> => {
     const response = await api.post('/api/user/aggregate-link');
+    return response.data;
+  },
+};
+
+export const tagsApi = {
+  list: async (): Promise<PromptTag[]> => {
+    const response = await api.get('/api/tags');
+    return response.data;
+  },
+
+  create: async (data: { name: string; prompt?: string | null }): Promise<PromptTag> => {
+    const response = await api.post('/api/tags', data);
+    return response.data;
+  },
+
+  update: async (
+    tagId: number,
+    data: { name?: string; prompt?: string | null }
+  ): Promise<PromptTag> => {
+    const response = await api.patch(`/api/tags/${tagId}`, data);
+    return response.data;
+  },
+
+  delete: async (tagId: number): Promise<{ status: string; id: number }> => {
+    const response = await api.delete(`/api/tags/${tagId}`);
     return response.data;
   },
 };

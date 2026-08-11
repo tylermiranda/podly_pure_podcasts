@@ -53,9 +53,19 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
     # When Podly last successfully fetched this feed's RSS (UTC naive).
     # Null until the first successful fetch/refresh after the column was added.
     last_fetched_at = db.Column(db.DateTime, nullable=True)
+    # When a podcast client last requested this feed's Podly RSS URL (UTC naive).
+    last_client_polled_at = db.Column(db.DateTime, nullable=True)
+    # Normalized podcast-client display name derived from User-Agent.
+    last_client_name = db.Column(db.String(64), nullable=True)
     # Per-feed custom prompt appended to the base LLM ad detection system prompt,
     # null = no custom instructions (use base prompt only)
     custom_llm_ad_prompt = db.Column(db.Text, nullable=True)
+    # Optional reusable prompt tag (e.g. "noiser") applied during ad classification.
+    prompt_tag_id = db.Column(
+        db.Integer,
+        db.ForeignKey("tag.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     posts = db.relationship(
         "Post", backref="feed", lazy=True, order_by="Post.release_date.desc()"
@@ -65,9 +75,30 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
         back_populates="feed",
         cascade="all, delete-orphan",
     )
+    prompt_tag = db.relationship("Tag", foreign_keys=[prompt_tag_id], lazy="joined")
 
     def __repr__(self) -> str:
         return f"<Feed {self.title}>"
+
+
+class Tag(db.Model):  # type: ignore[name-defined, misc]
+    """Reusable ad-detection prompt template assignable to a single feed."""
+
+    __tablename__ = "tag"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    name = db.Column(db.String(128), unique=True, nullable=False)
+    prompt = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=_utc_now_naive, nullable=False)
+    updated_at = db.Column(
+        db.DateTime,
+        default=_utc_now_naive,
+        onupdate=_utc_now_naive,
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<Tag {self.name}>"
 
 
 class FeedAccessToken(db.Model):  # type: ignore[name-defined, misc]

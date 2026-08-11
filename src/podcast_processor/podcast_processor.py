@@ -912,11 +912,9 @@ class PodcastProcessor:
             DEFAULT_USER_PROMPT_TEMPLATE_PATH
         )
         system_prompt = self.get_system_prompt(DEFAULT_SYSTEM_PROMPT_PATH)
-
-        # Append per-feed custom prompt if set
-        custom_prompt = getattr(post.feed, "custom_llm_ad_prompt", None)
-        if custom_prompt:
-            system_prompt = system_prompt + "\n\n" + custom_prompt
+        system_prompt = self.build_ad_classification_system_prompt(
+            system_prompt, post.feed
+        )
 
         self.ad_classifier.classify(
             transcript_segments=transcript_segments,
@@ -1091,6 +1089,21 @@ class PodcastProcessor:
         """Load the system prompt from a file."""
         with open(system_prompt_path) as f:
             return f.read()
+
+    @staticmethod
+    def build_ad_classification_system_prompt(base_prompt: str, feed: Any) -> str:
+        """Compose base → tag prompt → per-feed custom prompt."""
+        parts = [base_prompt]
+        prompt_tag = getattr(feed, "prompt_tag", None)
+        tag_prompt = (
+            getattr(prompt_tag, "prompt", None) if prompt_tag is not None else None
+        )
+        if isinstance(tag_prompt, str) and tag_prompt.strip():
+            parts.append(tag_prompt.strip())
+        custom_prompt = getattr(feed, "custom_llm_ad_prompt", None)
+        if isinstance(custom_prompt, str) and custom_prompt.strip():
+            parts.append(custom_prompt.strip())
+        return "\n\n".join(parts)
 
     def get_user_prompt_template(self, prompt_template_path: str) -> Template:
         """Load the user prompt template from a file."""

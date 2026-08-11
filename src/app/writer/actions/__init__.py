@@ -21,6 +21,7 @@ from .feeds import (
     ensure_user_feed_membership_action as ensure_user_feed_membership_action,
 )
 from .feeds import increment_download_count_action as increment_download_count_action
+from .feeds import record_feed_client_poll_action as record_feed_client_poll_action
 from .feeds import refresh_feed_action as refresh_feed_action
 from .feeds import (
     remove_user_feed_membership_action as remove_user_feed_membership_action,

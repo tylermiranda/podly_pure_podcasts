@@ -181,15 +181,14 @@ class TestCustomPromptAppendedToSystemPrompt:
                 ad_classifier=AdClassifier(config=config),
             )
 
-            # Build the system prompt the way _classify_ad_segments does
             base_prompt = processor.get_system_prompt(DEFAULT_SYSTEM_PROMPT_PATH)
-
-            # Simulate what _classify_ad_segments does - retrieve custom prompt
-            # and append it
-            if stored_prompt:
-                final_prompt = base_prompt + "\n\n" + stored_prompt
-            else:
-                final_prompt = base_prompt
+            feed = SimpleNamespace(
+                prompt_tag=None,
+                custom_llm_ad_prompt=stored_prompt,
+            )
+            final_prompt = PodcastProcessor.build_ad_classification_system_prompt(
+                base_prompt, feed
+            )
 
             # Verify the custom prompt is appended
             assert base_prompt in final_prompt
@@ -208,26 +207,26 @@ class TestCustomPromptAppendedToSystemPrompt:
             )
 
             base_prompt = processor.get_system_prompt(DEFAULT_SYSTEM_PROMPT_PATH)
-
-            # Simulate what _classify_ad_segments does
-            if stored_prompt:
-                final_prompt = base_prompt + "\n\n" + stored_prompt
-            else:
-                final_prompt = base_prompt
+            feed = SimpleNamespace(
+                prompt_tag=None,
+                custom_llm_ad_prompt=stored_prompt,
+            )
+            final_prompt = PodcastProcessor.build_ad_classification_system_prompt(
+                base_prompt, feed
+            )
 
             # Should be exactly the base prompt, no custom addition
             assert final_prompt == base_prompt
 
     def test_prompt_append_logic_integration(self, app):
-        """Integration test: verify the actual _classify_ad_segments code path
-        appends the custom prompt by checking the implementation."""
+        """Integration test: verify classification composes via helper."""
         import inspect
 
-        source = inspect.getsource(PodcastProcessor._classify_ad_segments)
+        classify_source = inspect.getsource(PodcastProcessor._classify_ad_segments)
+        helper_source = inspect.getsource(
+            PodcastProcessor.build_ad_classification_system_prompt
+        )
 
-        # Verify the implementation retrieves custom_llm_ad_prompt from post.feed
-        assert "custom_llm_ad_prompt" in source
-        assert "post.feed" in source or "feed" in source
-
-        # Verify it appends to system_prompt
-        assert "system_prompt" in source
+        assert "build_ad_classification_system_prompt" in classify_source
+        assert "custom_llm_ad_prompt" in helper_source
+        assert "prompt_tag" in helper_source

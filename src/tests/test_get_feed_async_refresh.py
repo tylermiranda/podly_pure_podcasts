@@ -126,6 +126,8 @@ def test_get_feed_kickoff_resumes_after_cooldown(app):
     with (
         mock.patch("app.routes.feed_routes.generate_feed_xml", return_value=b"<rss/>"),
         mock.patch("app.routes.feed_routes._spawn_async_refresh") as mock_spawn,
+        # Client-poll stamping also uses monotonic; keep this test focused on refresh.
+        mock.patch("app.routes.feed_routes._maybe_record_client_poll"),
         mock.patch(
             "app.routes.feed_routes.time.monotonic", side_effect=lambda: next(times)
         ),
