@@ -436,20 +436,21 @@ number_of_episodes_to_whitelist_from_archive_of_new_feed setting: {entry.title}"
         if len(post_update) > 1:
             existing_post_updates.append(post_update)
 
-    if updates or new_posts or existing_post_updates:
-        writer_client.action(
-            "refresh_feed",
-            {
-                "feed_id": feed.id,
-                "updates": updates,
-                "new_posts": new_posts,
-                "existing_post_updates": existing_post_updates,
-            },
-            wait=True,
-        )
-        # Refreshes are written through the separate writer service, so expire the
-        # current request session before serializing the feed response.
-        db.session.expire_all()
+    # Always call the writer so last_fetched_at is stamped even when there are
+    # no content changes (new posts / metadata updates).
+    writer_client.action(
+        "refresh_feed",
+        {
+            "feed_id": feed.id,
+            "updates": updates,
+            "new_posts": new_posts,
+            "existing_post_updates": existing_post_updates,
+        },
+        wait=True,
+    )
+    # Refreshes are written through the separate writer service, so expire the
+    # current request session before serializing the feed response.
+    db.session.expire_all()
 
     logger.info(f"Feed with ID: {feed.id} refreshed")
 
@@ -478,6 +479,10 @@ def add_feed(feed_data: feedparser.FeedParserDict, language: str | None = None) 
             "author": feed_data.feed.get("author", ""),
             "rss_url": feed_data.href,
             "image_url": feed_data.feed.image.href,
+            # Successful RSS fetch already happened above (via add_or_refresh_feed).
+            "last_fetched_at": datetime.datetime.now(datetime.UTC)
+            .replace(tzinfo=None)
+            .isoformat(),
         }
         if language is not None:
             feed_dict["language"] = language

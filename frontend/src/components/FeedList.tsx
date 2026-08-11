@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Feed } from '../types';
 import { WHISPER_LANGUAGE_NAMES } from '../constants/whisperLanguages';
 import type { FeedSortOption } from '../utils/feedListSort';
+import { formatLastFetchedLabel } from '../utils/relativeTime';
 
 function getLatestEpisodeTimestamp(feed: Feed): number | null {
   if (!feed.latest_episode_release_date) {
@@ -215,12 +216,14 @@ export default function FeedList({
                       <p className="text-sm text-gray-600 mt-1">by {feed.author}</p>
                     )}
                     <div className="flex items-center gap-2 mt-2">
-                      <span className="text-xs text-gray-500">{feed.posts_count} episodes</span>
+                      <span className="text-xs text-gray-500 dark:text-slate-400">
+                        {feed.posts_count} episodes
+                      </span>
                       {feed.language && (
                         <span
                           lang={feed.language}
                           title={`Transcription language: ${WHISPER_LANGUAGE_NAMES[feed.language] ?? feed.language}`}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-gray-100 text-gray-700 border border-gray-200"
+                          className="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-gray-100 text-gray-700 border border-gray-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600"
                         >
                           {feed.language}
                         </span>
@@ -244,6 +247,30 @@ export default function FeedList({
                           )}
                         </div>
                       )}
+                    </div>
+                    <div
+                      className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400"
+                      title={
+                        feed.last_fetched_at
+                          ? new Date(feed.last_fetched_at).toLocaleString()
+                          : 'This feed has not been fetched yet'
+                      }
+                    >
+                      <svg
+                        className="h-3.5 w-3.5 shrink-0 opacity-70"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        aria-hidden="true"
+                      >
+                        <path d="M4 11a9 9 0 0 1 9 9" />
+                        <path d="M4 4a16 16 0 0 1 16 16" />
+                        <circle cx="5" cy="19" r="1" fill="currentColor" stroke="none" />
+                      </svg>
+                      <span>{formatLastFetchedLabel(feed.last_fetched_at)}</span>
                     </div>
                   </div>
                 </div>

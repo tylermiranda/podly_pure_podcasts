@@ -482,6 +482,121 @@ def test_refresh_feed_action_updates_existing_post_description(app):
         assert post.description == "<p>Rich source description</p>"
 
 
+@mock.patch("app.feeds.writer_client")
+@mock.patch("app.feeds._should_auto_whitelist_new_posts")
+@mock.patch("app.feeds.make_post")
+@mock.patch("app.feeds.fetch_feed")
+def test_refresh_feed_calls_writer_even_with_no_content_changes(
+    mock_fetch_feed,
+    mock_make_post,
+    mock_should_auto_whitelist,
+    mock_writer_client,
+    mock_feed,
+    mock_feed_data,
+    mock_db_session,
+):
+    """No-op content refresh must still stamp last_fetched_at via the writer."""
+    existing_posts = []
+    for idx, entry in enumerate(mock_feed_data.entries, start=1):
+        post = MockPost(
+            id=40 + idx,
+            guid=entry.id,
+            title=entry.title,
+            description=f"Episode {idx} description",
+            image_url=mock_feed.image_url,
+            duration=3600 if idx == 1 else 1800,
+        )
+        post.processed_audio_path = f"/tmp/processed-{idx}.mp3"
+        existing_posts.append(post)
+    mock_feed.posts = existing_posts
+
+    # Keep feed image and entry metadata identical so no updates are produced.
+    mock_feed_data.feed.image = mock.MagicMock()
+    mock_feed_data.feed.image.href = mock_feed.image_url
+    mock_feed_data.feed.get = mock.MagicMock(
+        side_effect=lambda key, default=None: (
+            {"href": mock_feed.image_url} if key == "image" else default
+        )
+    )
+
+    mock_fetch_feed.return_value = mock_feed_data
+    mock_should_auto_whitelist.return_value = True
+    mock_make_post.return_value = MockPost(guid=str(uuid.uuid4()))
+
+    refresh_feed(mock_feed)
+
+    mock_writer_client.action.assert_called_once()
+    action_name, payload = mock_writer_client.action.call_args.args[:2]
+    assert action_name == "refresh_feed"
+    assert payload["feed_id"] == mock_feed.id
+    assert payload["updates"] == {}
+    assert payload["new_posts"] == []
+    assert payload["existing_post_updates"] == []
+    mock_db_session.expire_all.assert_called_once()
+
+
+def test_refresh_feed_action_stamps_last_fetched_at(app):
+    with app.app_context():
+        feed = Feed(title="Test Feed", rss_url="https://example.com/feed-stamp.xml")
+        db.session.add(feed)
+        db.session.commit()
+        assert feed.last_fetched_at is None
+
+        result = refresh_feed_action({"feed_id": feed.id})
+        db.session.commit()
+        db.session.refresh(feed)
+
+        assert result["feed_id"] == feed.id
+        assert feed.last_fetched_at is not None
+
+
+def test_add_feed_action_stamps_last_fetched_at(app):
+    from app.writer.actions.feeds import add_feed_action
+
+    with app.app_context():
+        result = add_feed_action(
+            {
+                "feed": {
+                    "title": "New Feed",
+                    "rss_url": "https://example.com/new-feed.xml",
+                    "description": "desc",
+                    "author": "author",
+                    "image_url": "https://example.com/img.png",
+                },
+                "posts": [],
+            }
+        )
+        db.session.commit()
+        feed = db.session.get(Feed, result["feed_id"])
+        assert feed is not None
+        assert feed.last_fetched_at is not None
+
+
+def test_serialize_feed_includes_last_fetched_at(app):
+    from app.routes.feed_routes import _serialize_feed
+
+    with app.app_context():
+        feed = Feed(
+            title="Serialized Feed",
+            rss_url="https://example.com/serialized.xml",
+            last_fetched_at=datetime.datetime(2026, 3, 15, 12, 0, 0),
+        )
+        db.session.add(feed)
+        db.session.commit()
+
+        payload = _serialize_feed(feed)
+        assert payload["last_fetched_at"] == "2026-03-15T12:00:00"
+
+        feed_never = Feed(
+            title="Never Fetched",
+            rss_url="https://example.com/never.xml",
+        )
+        db.session.add(feed_never)
+        db.session.commit()
+        payload_never = _serialize_feed(feed_never)
+        assert payload_never["last_fetched_at"] is None
+
+
 @mock.patch("app.feeds.fetch_feed")
 @mock.patch("app.feeds.refresh_feed")
 def test_add_or_refresh_feed_existing(

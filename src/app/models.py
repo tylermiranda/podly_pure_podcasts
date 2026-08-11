@@ -50,6 +50,9 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
     enable_llm_chapter_fallback_tagging = db.Column(db.Boolean, nullable=True)
     auto_whitelist_new_episodes_override = db.Column(db.Boolean, nullable=True)
     language = db.Column(db.Text, nullable=True)
+    # When Podly last successfully fetched this feed's RSS (UTC naive).
+    # Null until the first successful fetch/refresh after the column was added.
+    last_fetched_at = db.Column(db.DateTime, nullable=True)
 
     posts = db.relationship(
         "Post", backref="feed", lazy=True, order_by="Post.release_date.desc()"

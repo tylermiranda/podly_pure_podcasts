@@ -952,6 +952,7 @@ def _serialize_feed(
         elif not auth_enabled:
             is_active_subscription = True
 
+    last_fetched_at = getattr(feed, "last_fetched_at", None)
     feed_payload = {
         "id": feed.id,
         "title": feed.title,
@@ -965,6 +966,9 @@ def _serialize_feed(
         "language": feed.language,
         "posts_count": len(cast(list[Any], feed.posts)),
         "latest_episode_release_date": _latest_episode_release_date(feed),
+        "last_fetched_at": (
+            last_fetched_at.isoformat() if last_fetched_at is not None else None
+        ),
         "member_count": len(member_ids),
         "is_member": is_member,
         "is_active_subscription": is_active_subscription,

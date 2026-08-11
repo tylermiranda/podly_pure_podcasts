@@ -30,8 +30,12 @@ def refresh_feed_action(params: dict[str, Any]) -> dict[str, Any]:
     if not feed:
         raise ValueError(f"Feed {feed_id} not found")
 
-    for k, v in updates.items():
-        setattr(feed, k, v)
+    for key, value in updates.items():
+        setattr(feed, key, value)
+
+    # Always stamp a successful refresh, even when there are no content changes.
+    # Done after applying updates so a stale last_fetched_at in `updates` cannot win.
+    feed.last_fetched_at = datetime.now(UTC).replace(tzinfo=None)
 
     created_posts = []
     for post_data in new_posts_data:
@@ -94,7 +98,17 @@ def add_feed_action(params: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("feed data must be a dictionary")
     posts_data = params.get("posts", [])
 
+    # Normalize optional datetime fields before constructing the model.
+    if "last_fetched_at" in feed_data and isinstance(feed_data["last_fetched_at"], str):
+        feed_data = {
+            **feed_data,
+            "last_fetched_at": datetime.fromisoformat(feed_data["last_fetched_at"]),
+        }
+
     feed = Feed(**feed_data)
+    # Adding a feed always follows a successful RSS fetch; stamp if missing.
+    if feed.last_fetched_at is None:
+        feed.last_fetched_at = datetime.now(UTC).replace(tzinfo=None)
     db.session.add(feed)
     db.session.flush()
 
@@ -256,17 +270,18 @@ def create_dev_test_feed_action(params: dict[str, Any]) -> dict[str, Any]:
     if existing:
         return {"feed_id": existing.id, "created": False}
 
+    now = datetime.now(UTC).replace(tzinfo=None)
     feed = Feed(
         title=title,
         rss_url=rss_url,
         image_url=params.get("image_url"),
         description=params.get("description"),
         author=params.get("author"),
+        last_fetched_at=now,
     )
     db.session.add(feed)
     db.session.flush()
 
-    now = datetime.now(UTC).replace(tzinfo=None)
     # Use a larger default so dev/test feeds exercise paging in the UI
     post_count = int(params.get("post_count") or 30)
     for i in range(1, post_count + 1):

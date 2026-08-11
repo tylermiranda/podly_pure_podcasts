@@ -7,6 +7,7 @@ export interface Feed {
   image_url?: string;
   posts_count: number;
   latest_episode_release_date?: string | null;
+  last_fetched_at?: string | null;
   member_count?: number;
   is_member?: boolean;
   is_active_subscription?: boolean;
