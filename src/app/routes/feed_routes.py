@@ -1030,6 +1030,18 @@ def _require_user_or_error(
     return user, None
 
 
+def _utc_isoformat(value: datetime.datetime | None) -> str | None:
+    """Serialize a datetime as an ISO-8601 UTC string ending in Z.
+
+    Naive datetimes are treated as UTC (matching how Podly stores them).
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return f"{value.isoformat()}Z"
+    return value.astimezone(datetime.UTC).isoformat().replace("+00:00", "Z")
+
+
 def _latest_episode_release_date(feed: Feed) -> str | None:
     latest_release_date: datetime.datetime | None = None
 
@@ -1049,7 +1061,7 @@ def _latest_episode_release_date(feed: Feed) -> str | None:
         if latest_release_date is None or normalized_release_date > latest_release_date:
             latest_release_date = normalized_release_date
 
-    return latest_release_date.isoformat() if latest_release_date else None
+    return _utc_isoformat(latest_release_date)
 
 
 def _serialize_feed(
@@ -1092,14 +1104,8 @@ def _serialize_feed(
         "language": feed.language,
         "posts_count": len(cast(list[Any], feed.posts)),
         "latest_episode_release_date": _latest_episode_release_date(feed),
-        "last_fetched_at": (
-            last_fetched_at.isoformat() if last_fetched_at is not None else None
-        ),
-        "last_client_polled_at": (
-            last_client_polled_at.isoformat()
-            if last_client_polled_at is not None
-            else None
-        ),
+        "last_fetched_at": _utc_isoformat(last_fetched_at),
+        "last_client_polled_at": _utc_isoformat(last_client_polled_at),
         "last_client_name": getattr(feed, "last_client_name", None),
         "member_count": len(member_ids),
         "is_member": is_member,

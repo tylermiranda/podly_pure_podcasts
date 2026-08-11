@@ -13,7 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { copyToClipboard } from '../utils/clipboard';
 import { emitDiagnosticError } from '../utils/diagnostics';
 import { getHttpErrorInfo } from '../utils/httpError';
-import { formatUpstreamRefreshedLabel } from '../utils/relativeTime';
+import { formatUpstreamRefreshedLabel, parseApiTimestamp } from '../utils/relativeTime';
 
 interface FeedDetailProps {
   feed: Feed;
@@ -705,7 +705,7 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                   className="mt-1 text-sm text-gray-500"
                   title={
                     currentFeed.last_fetched_at
-                      ? new Date(currentFeed.last_fetched_at).toLocaleString()
+                      ? parseApiTimestamp(currentFeed.last_fetched_at).toLocaleString()
                       : 'Podly has not refreshed the upstream RSS for this feed yet'
                   }
                 >

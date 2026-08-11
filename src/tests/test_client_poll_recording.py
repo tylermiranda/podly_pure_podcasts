@@ -123,5 +123,5 @@ def test_serialize_feed_includes_client_poll_fields(app):
         from app.routes.feed_routes import _serialize_feed
 
         payload = _serialize_feed(feed)
-        assert payload["last_client_polled_at"] == "2026-03-15T12:00:00"
+        assert payload["last_client_polled_at"] == "2026-03-15T12:00:00Z"
         assert payload["last_client_name"] == "Apple Podcasts"

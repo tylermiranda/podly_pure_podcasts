@@ -20,6 +20,11 @@ _UA_PATTERNS: tuple[tuple[str, str], ...] = (
     ("player fm", "Player FM"),
     ("playerfm", "Player FM"),
     ("spotify", "Spotify"),
+    # YouTube Music before generic Google / Mozilla fallbacks.
+    ("com.google.ios.youtubemusic", "YouTube Music"),
+    ("youtube music", "YouTube Music"),
+    ("youtubemusic", "YouTube Music"),
+    ("feedfetcher", "YouTube Music"),
     ("googlebot-podcast", "Google Podcasts"),
     ("google podcasts", "Google Podcasts"),
     ("downcast", "Downcast"),

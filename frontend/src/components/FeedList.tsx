@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Feed } from '../types';
 import { WHISPER_LANGUAGE_NAMES } from '../constants/whisperLanguages';
 import type { FeedSortOption } from '../utils/feedListSort';
-import { formatClientFetchedLabel } from '../utils/relativeTime';
+import { formatClientFetchedLabel, parseApiTimestamp } from '../utils/relativeTime';
 
 function getLatestEpisodeTimestamp(feed: Feed): number | null {
   if (!feed.latest_episode_release_date) {
@@ -252,7 +252,7 @@ export default function FeedList({
                       className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400"
                       title={
                         feed.last_client_polled_at
-                          ? new Date(feed.last_client_polled_at).toLocaleString()
+                          ? parseApiTimestamp(feed.last_client_polled_at).toLocaleString()
                           : 'No podcast client has requested this Podly feed yet'
                       }
                     >

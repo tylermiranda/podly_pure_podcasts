@@ -27,3 +27,20 @@ def test_normalize_empty_and_unknown():
     assert normalize_client_user_agent(None) is None
     assert normalize_client_user_agent("   ") is None
     assert normalize_client_user_agent("MyCustomPodClient/9.0") == "MyCustomPodClient"
+
+
+def test_normalize_youtube_music_variants():
+    assert (
+        normalize_client_user_agent(
+            "FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)"
+        )
+        == "YouTube Music"
+    )
+    assert normalize_client_user_agent("YouTubeMusic/1.0") == "YouTube Music"
+    assert (
+        normalize_client_user_agent(
+            "com.google.ios.youtubemusic/4.0 (iPhone; iOS 17.0)"
+        )
+        == "YouTube Music"
+    )
+    assert normalize_client_user_agent("YouTube Music Podcasts") == "YouTube Music"
