@@ -17,6 +17,25 @@ Podly uses Whisper and Chat GPT to remove ads from podcasts.
 
 <img width="100%" src="docs/images/screenshot.png" />
 
+## This fork
+
+Fork of [podly-pure-podcasts/podly_pure_podcasts](https://github.com/podly-pure-podcasts/podly_pure_podcasts) with fixes for upgrades and tighter ad removal. Published image:
+
+```text
+ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
+```
+
+### Changes vs upstream
+
+| Area | Change |
+|------|--------|
+| **Migrations** | Merges Alembic dual heads so existing DBs can upgrade (upstream [#234](https://github.com/podly-pure-podcasts/podly_pure_podcasts/issues/234)). |
+| **Custom ad prompt** | Per-feed **Custom Ad Detection Instructions** in Feed Settings (`custom_llm_ad_prompt`), appended to the LLM system prompt during classification. |
+| **Cut defaults** | New installs / reset defaults: `fade_ms=0` (was 3000), `min_ad_segment_length_seconds=5` (was 14), `min_confidence=0.7` (was 0.8). Existing DB values are unchanged until you update Output settings. |
+| **Feed freshness** | Tracks `last_fetched_at` and shows relative freshness in the feed list. |
+
+**Why the cut defaults matter:** a 3s fade leaves audible ad bleed at every cut; a 14s minimum length drops short prerolls. Prefer `fade_ms=0` and a lower length threshold when ads still play after processing. For host-read / network-specific patterns (e.g. Wondery), set a custom prompt on that feed and reprocess.
+
 ## How To Run
 
 You have a few options to get started:
