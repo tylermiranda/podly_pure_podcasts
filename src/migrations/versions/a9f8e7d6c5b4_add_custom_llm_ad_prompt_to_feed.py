@@ -1,7 +1,7 @@
 """add custom_llm_ad_prompt to feed
 
 Revision ID: a9f8e7d6c5b4
-Revises: 3e5eebc6b3b1
+Revises: e2cc4c50e355
 Create Date: 2026-06-08 16:00:00.000000
 
 """
@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "a9f8e7d6c5b4"
-down_revision = "3e5eebc6b3b1"
+down_revision = "e2cc4c50e355"
 branch_labels = None
 depends_on = None
 
