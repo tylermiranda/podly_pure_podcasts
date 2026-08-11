@@ -38,6 +38,58 @@ ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
 
 **Why the cut defaults matter:** a 3s fade leaves audible ad bleed at every cut; a 14s minimum length drops short prerolls. Prefer `fade_ms=0` and a lower length threshold when ads still play after processing. For host-read / network-specific patterns (e.g. Wondery / Noiser), assign a prompt tag or set a custom prompt on that feed and reprocess.
 
+### Prompt tags (examples)
+
+Create tags once under **Config → Default → Prompt Tags** (or **Manage tags** from Feed Settings / Add Feed), then assign **one tag per feed**. At classify time Podly builds the LLM instructions as:
+
+```text
+[global base ad-detection prompt]
++ [selected tag.prompt, if any]
++ [feed custom_llm_ad_prompt, if any]
+```
+
+Use a tag for patterns shared across a network or creator; use the per-feed custom field only for show-specific quirks.
+
+**Example tags**
+
+| Tag | Good for | Prompt gist |
+|-----|----------|-------------|
+| `wondery` | Wondery originals | Preroll network/show promo; midroll “brought to you by” host-reads; cross-promo for other Wondery titles. Keep narrative storytelling as content. |
+| `noiser` | Noiser shows (`Short History Of…`, `Real Survival Stories`, …) | Preroll/partner blocks; midroll sponsor stings; other-Noiser cross-promo. Prefer cutting whole ad blocks, not leaving short sponsor tails. |
+| `npr` | NPR / public radio | Short underwriting (“support for … comes from”), membership/NPR Plus pitches. Keep reporting and explainers. |
+| `acquired` | Long-form host-read interview shows | Distinct midroll sponsor reads with promo codes/URLs; do not mark host banter or business analysis as ads. |
+
+**Example tag prompt** (`noiser`):
+
+```text
+This is a Noiser production (e.g. Short History Of..., Real Survival Stories). Ads often:
+- Open with a Noiser/network or partner preroll
+- Use midroll host-read or produced sponsor blocks with clear 'ad break' pacing or stings
+- Promote other Noiser shows at boundaries
+Identify sponsor reads and promo blocks as ads. Preserve narrative history storytelling and
+dramatic reenactment as content. Prefer cutting whole ad blocks rather than leaving short
+sponsor tails at the edges.
+```
+
+**Example workflow**
+
+1. Create tag `wondery` with the Wondery prompt above.
+2. In each Wondery feed’s **Feed Settings**, set **Prompt tag** → `wondery` (or pick it when adding the feed).
+3. Optionally add a per-feed custom line, e.g. `Also treat the cold-open Audible promo in the first 45s as an ad.`
+4. Reprocess episodes so classification picks up the new instructions.
+
+**API sketch** (authenticated session):
+
+```bash
+# Create a tag
+curl -X POST "$PODLY/api/tags" -H 'Content-Type: application/json' \
+  -d '{"name":"noiser","prompt":"This is a Noiser production..."}'
+
+# Assign to a feed
+curl -X PATCH "$PODLY/api/feeds/16/settings" -H 'Content-Type: application/json' \
+  -d '{"prompt_tag_id":3}'
+```
+
 ## How To Run
 
 You have a few options to get started:
