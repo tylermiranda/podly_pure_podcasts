@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { tagsApi } from '../services/api';
 import type { PromptTag } from '../types';
@@ -10,6 +10,8 @@ interface PromptTagsPanelProps {
 
 export default function PromptTagsPanel({ enabled = true }: PromptTagsPanelProps) {
   const queryClient = useQueryClient();
+  const editorRef = useRef<HTMLDivElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [name, setName] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -68,6 +70,10 @@ export default function PromptTagsPanel({ enabled = true }: PromptTagsPanelProps
     setName(tag.name);
     setPrompt(tag.prompt || '');
     setFormError(null);
+    requestAnimationFrame(() => {
+      editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      nameInputRef.current?.focus();
+    });
   };
 
   const handleSave = () => {
@@ -86,11 +92,12 @@ export default function PromptTagsPanel({ enabled = true }: PromptTagsPanelProps
 
   return (
     <div className="space-y-4">
-      <div className="space-y-2">
+      <div ref={editorRef} className="space-y-2">
         <label className="block text-sm font-medium text-gray-700">
           {editingId == null ? 'New tag' : 'Edit tag'}
         </label>
         <input
+          ref={nameInputRef}
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}

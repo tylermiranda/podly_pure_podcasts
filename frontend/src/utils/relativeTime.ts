@@ -1,11 +1,21 @@
 /**
+ * Parse an API ISO timestamp, treating values without a timezone as UTC.
+ * Podly stores several datetimes as UTC-naive; older payloads omit `Z`.
+ */
+export function parseApiTimestamp(isoTimestamp: string): Date {
+  const trimmed = isoTimestamp.trim();
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
+  return new Date(hasTimezone ? trimmed : `${trimmed}Z`);
+}
+
+/**
  * Format an ISO timestamp as a short relative English phrase
  * (e.g. "just now", "5 minutes ago", "1 hour ago").
  * Falls back to a short absolute date for timestamps older than ~30 days
  * or when the input cannot be parsed.
  */
 export function formatRelativeTime(isoTimestamp: string, now: Date = new Date()): string {
-  const date = new Date(isoTimestamp);
+  const date = parseApiTimestamp(isoTimestamp);
   if (Number.isNaN(date.getTime())) {
     return 'unknown';
   }

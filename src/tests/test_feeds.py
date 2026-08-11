@@ -585,7 +585,7 @@ def test_serialize_feed_includes_last_fetched_at(app):
         db.session.commit()
 
         payload = _serialize_feed(feed)
-        assert payload["last_fetched_at"] == "2026-03-15T12:00:00"
+        assert payload["last_fetched_at"] == "2026-03-15T12:00:00Z"
 
         feed_never = Feed(
             title="Never Fetched",

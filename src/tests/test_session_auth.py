@@ -283,6 +283,6 @@ def test_feeds_endpoint_includes_latest_episode_release_date(auth_app: Flask) ->
     feeds_by_id = {feed["id"]: feed for feed in payload}
     assert (
         feeds_by_id[dated_feed_id]["latest_episode_release_date"]
-        == latest_release_date.isoformat()
+        == "2024-02-01T15:30:00Z"
     )
     assert feeds_by_id[undated_feed_id]["latest_episode_release_date"] is None
