@@ -87,11 +87,18 @@ export const feedsApi = {
     return response.data;
   },
 
-  addFeed: async (url: string, language?: string | null): Promise<void> => {
+  addFeed: async (
+    url: string,
+    language?: string | null,
+    promptTagId?: number | null
+  ): Promise<void> => {
     const formData = new FormData();
     formData.append('url', url);
     if (language) {
       formData.append('language', language);
+    }
+    if (promptTagId != null) {
+      formData.append('prompt_tag_id', String(promptTagId));
     }
     await api.post('/feed', formData);
   },

@@ -33,6 +33,7 @@ from app.feeds import (
     _get_base_url,
     add_or_refresh_feed,
     ensure_requested_feed_language,
+    ensure_requested_feed_prompt_tag,
     generate_aggregate_feed_xml,
     generate_feed_xml,
     is_feed_active_for_user,
@@ -216,6 +217,10 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
     except ValueError:
         return make_response((whisper_language_error("empty"), 400))
 
+    prompt_tag_id, prompt_tag_error = _parse_form_prompt_tag_id()
+    if prompt_tag_error is not None:
+        return prompt_tag_error
+
     url = fix_url(url)
 
     if current_app.config.get("developer_mode") and url.startswith("http://test-feed/"):
@@ -230,8 +235,9 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
             if allowance_error:
                 return allowance_error
 
-        feed = add_or_refresh_feed(url, language=language)
+        feed = add_or_refresh_feed(url, language=language, prompt_tag_id=prompt_tag_id)
         ensure_requested_feed_language(feed, language)
+        ensure_requested_feed_prompt_tag(feed, prompt_tag_id)
         if user:
             created, previous_count = ensure_user_feed_membership(feed, user.id)
             if created and previous_count == 0:
@@ -409,24 +415,52 @@ def _apply_custom_llm_ad_prompt_update(
     return None
 
 
+def _validate_prompt_tag_id(
+    prompt_tag_id: Any,
+) -> tuple[int | None, ResponseReturnValue | None]:
+    """Validate a prompt_tag_id value. Returns (value, error_response)."""
+    if prompt_tag_id is None:
+        return None, None
+    if not isinstance(prompt_tag_id, int):
+        return (
+            None,
+            (
+                jsonify({"error": "prompt_tag_id must be an integer or null"}),
+                400,
+            ),
+        )
+    if db.session.get(Tag, prompt_tag_id) is None:
+        return (
+            None,
+            (jsonify({"error": "prompt_tag_id does not reference a tag"}), 400),
+        )
+    return prompt_tag_id, None
+
+
+def _parse_form_prompt_tag_id() -> tuple[int | None, ResponseReturnValue | None]:
+    """Parse optional prompt_tag_id from form data. Empty/missing → None."""
+    raw = request.form.get("prompt_tag_id")
+    if raw is None or str(raw).strip() == "":
+        return None, None
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return (
+            None,
+            (jsonify({"error": "prompt_tag_id must be an integer or null"}), 400),
+        )
+    return _validate_prompt_tag_id(value)
+
+
 def _apply_prompt_tag_id_update(
     payload: dict[str, Any],
     updates: dict[str, Any],
 ) -> ResponseReturnValue | None:
     if "prompt_tag_id" not in payload:
         return None
-    prompt_tag_id = payload["prompt_tag_id"]
-    if prompt_tag_id is not None:
-        if not isinstance(prompt_tag_id, int):
-            return (
-                jsonify({"error": "prompt_tag_id must be an integer or null"}),
-                400,
-            )
-        if db.session.get(Tag, prompt_tag_id) is None:
-            return (
-                jsonify({"error": "prompt_tag_id does not reference a tag"}),
-                400,
-            )
+    prompt_tag_id, error = _validate_prompt_tag_id(payload["prompt_tag_id"])
+    if error is not None:
+        return error
     updates["prompt_tag_id"] = prompt_tag_id
     return None
 

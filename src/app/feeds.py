@@ -274,6 +274,23 @@ def ensure_requested_feed_language(feed: Feed, language: str | None) -> None:
     db.session.expire(feed, ["language"])
 
 
+def ensure_requested_feed_prompt_tag(feed: Feed, prompt_tag_id: int | None) -> None:
+    """Persist an explicit add-feed prompt tag when provided."""
+    if prompt_tag_id is None or feed.prompt_tag_id == prompt_tag_id:
+        return
+
+    result = writer_client.update(
+        "Feed",
+        feed.id,
+        {"prompt_tag_id": prompt_tag_id},
+        wait=True,
+    )
+    if result is None or not result.success:
+        raise RuntimeError(getattr(result, "error", "Failed to set feed prompt tag"))
+
+    db.session.expire(feed, ["prompt_tag_id", "prompt_tag"])
+
+
 def _get_base_url() -> str:
     try:
 
@@ -455,7 +472,11 @@ number_of_episodes_to_whitelist_from_archive_of_new_feed setting: {entry.title}"
     logger.info(f"Feed with ID: {feed.id} refreshed")
 
 
-def add_or_refresh_feed(url: str, language: str | None = None) -> Feed:
+def add_or_refresh_feed(
+    url: str,
+    language: str | None = None,
+    prompt_tag_id: int | None = None,
+) -> Feed:
     feed_data = fetch_feed(url)
     if "title" not in feed_data.feed:
         logger.error("Invalid feed URL")
@@ -464,16 +485,21 @@ def add_or_refresh_feed(url: str, language: str | None = None) -> Feed:
     feed = Feed.query.filter_by(rss_url=url).first()
     if feed:
         ensure_requested_feed_language(feed, language)
+        ensure_requested_feed_prompt_tag(feed, prompt_tag_id)
         refresh_feed(feed)
     else:
-        feed = add_feed(feed_data, language=language)
+        feed = add_feed(feed_data, language=language, prompt_tag_id=prompt_tag_id)
     return feed
 
 
-def add_feed(feed_data: feedparser.FeedParserDict, language: str | None = None) -> Feed:
+def add_feed(
+    feed_data: feedparser.FeedParserDict,
+    language: str | None = None,
+    prompt_tag_id: int | None = None,
+) -> Feed:
     logger.info(f"Storing feed: {feed_data.feed.title}")
     try:
-        feed_dict = {
+        feed_dict: dict[str, Any] = {
             "title": feed_data.feed.title,
             "description": feed_data.feed.get("description", ""),
             "author": feed_data.feed.get("author", ""),
@@ -486,6 +512,8 @@ def add_feed(feed_data: feedparser.FeedParserDict, language: str | None = None) 
         }
         if language is not None:
             feed_dict["language"] = language
+        if prompt_tag_id is not None:
+            feed_dict["prompt_tag_id"] = prompt_tag_id
 
         # Create a temporary feed object to use make_post helper
         temp_feed = Feed(**feed_dict)

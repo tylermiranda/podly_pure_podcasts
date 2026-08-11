@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
+from flask import Blueprint
+
 from app.extensions import db
 from app.models import Feed, Tag
 from app.routes.feed_routes import feed_bp
@@ -18,6 +20,15 @@ def _register_routes(app) -> None:
         app.register_blueprint(feed_bp)
     if "tag" not in app.blueprints:
         app.register_blueprint(tag_bp)
+    # add_feed redirects to main.index — stub it so url_for resolves.
+    if "main" not in app.blueprints:
+        main_bp = Blueprint("main", __name__)
+
+        @main_bp.route("/", endpoint="index")
+        def _index():
+            return "ok"
+
+        app.register_blueprint(main_bp)
 
 
 class TestPromptComposition:
@@ -162,3 +173,123 @@ class TestFeedSettingsPromptTag:
             )
             assert resp.status_code == 400
             mock_writer.update.assert_not_called()
+
+
+class TestAddFeedPromptTag:
+    def test_add_feed_with_prompt_tag_on_new_feed(self, app):
+        app.testing = True
+        _register_routes(app)
+
+        with app.app_context():
+            tag = Tag(name="noiser-add", prompt="TAG")
+            db.session.add(tag)
+            db.session.commit()
+            tag_id = tag.id
+
+        client = app.test_client()
+        url = "http://example.com/add-with-tag.rss"
+
+        def fake_add_or_refresh(_url, language=None, prompt_tag_id=None):
+            assert prompt_tag_id == tag_id
+            feed = Feed(
+                title="New Tagged Feed",
+                rss_url=_url,
+                language=language,
+                prompt_tag_id=prompt_tag_id,
+            )
+            db.session.add(feed)
+            db.session.commit()
+            return feed
+
+        with (
+            mock.patch(
+                "app.routes.feed_routes.add_or_refresh_feed",
+                side_effect=fake_add_or_refresh,
+            ),
+            mock.patch("app.routes.feed_routes.Thread"),
+            mock.patch("app.routes.feed_routes.writer_client") as mock_writer,
+        ):
+            mock_writer.action.return_value = SimpleNamespace(success=True)
+            mock_writer.update.return_value = SimpleNamespace(success=True)
+            response = client.post(
+                "/feed",
+                data={"url": url, "prompt_tag_id": str(tag_id)},
+                follow_redirects=False,
+            )
+
+        assert response.status_code in (200, 302), response.data
+        with app.app_context():
+            feed = Feed.query.filter_by(rss_url=url).first()
+            assert feed is not None
+            assert feed.prompt_tag_id == tag_id
+
+    def test_add_feed_rejects_unknown_prompt_tag(self, app):
+        app.testing = True
+        _register_routes(app)
+        client = app.test_client()
+
+        with mock.patch("app.routes.feed_routes.add_or_refresh_feed") as mock_add:
+            response = client.post(
+                "/feed",
+                data={
+                    "url": "http://example.com/bad-tag-add.rss",
+                    "prompt_tag_id": "999999",
+                },
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 400
+        mock_add.assert_not_called()
+
+    def test_add_feed_sets_existing_feed_prompt_tag(self, app):
+        app.testing = True
+        _register_routes(app)
+
+        with app.app_context():
+            tag = Tag(name="noiser-existing", prompt="TAG")
+            feed = Feed(
+                title="Existing Feed",
+                rss_url="http://example.com/retag.rss",
+            )
+            db.session.add_all([tag, feed])
+            db.session.commit()
+            tag_id = tag.id
+            feed_id = feed.id
+
+        client = app.test_client()
+
+        def fake_add_or_refresh(_url, language=None, prompt_tag_id=None):
+            return db.session.get(Feed, feed_id)
+
+        def writer_update_side_effect(model_name, model_id, updates, wait=True):
+            assert model_name == "Feed"
+            Feed.query.filter_by(id=model_id).update(updates)
+            db.session.commit()
+            return SimpleNamespace(success=True)
+
+        with (
+            mock.patch(
+                "app.routes.feed_routes.add_or_refresh_feed",
+                side_effect=fake_add_or_refresh,
+            ),
+            mock.patch("app.routes.feed_routes.Thread"),
+            mock.patch("app.routes.feed_routes.writer_client") as mock_writer,
+            mock.patch("app.feeds.writer_client") as mock_feeds_writer,
+        ):
+            mock_writer.action.return_value = SimpleNamespace(success=True)
+            mock_writer.update.side_effect = writer_update_side_effect
+            mock_feeds_writer.update.side_effect = writer_update_side_effect
+            response = client.post(
+                "/feed",
+                data={
+                    "url": "http://example.com/retag.rss",
+                    "prompt_tag_id": str(tag_id),
+                },
+                follow_redirects=False,
+            )
+
+        assert response.status_code in (200, 302), response.data
+        with app.app_context():
+            feed = db.session.get(Feed, feed_id)
+            assert feed is not None
+            assert feed.prompt_tag_id == tag_id

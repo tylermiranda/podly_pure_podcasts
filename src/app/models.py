@@ -75,7 +75,7 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
         back_populates="feed",
         cascade="all, delete-orphan",
     )
-    prompt_tag = db.relationship("Tag", foreign_keys=[prompt_tag_id], lazy="joined")
+    prompt_tag = db.relationship("Tag", foreign_keys=[prompt_tag_id], lazy="select")
 
     def __repr__(self) -> str:
         return f"<Feed {self.title}>"

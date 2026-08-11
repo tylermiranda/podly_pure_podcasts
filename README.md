@@ -31,7 +31,7 @@ ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
 |------|--------|
 | **Migrations** | Merges Alembic dual heads so existing DBs can upgrade (upstream [#234](https://github.com/podly-pure-podcasts/podly_pure_podcasts/issues/234)). |
 | **Custom ad prompt** | Per-feed **Custom Ad Detection Instructions** in Feed Settings (`custom_llm_ad_prompt`), appended to the LLM system prompt during classification. |
-| **Prompt tags** | Reusable prompt templates (e.g. `noiser`) managed in Feed Settings → Manage tags. Assign one tag per feed; composition is `base → tag.prompt → per-feed custom`. |
+| **Prompt tags** | Reusable prompt templates (e.g. `noiser`) managed under **Config → Prompt Tags** (also Feed Settings / Add Feed → Manage tags). Assign one tag per feed at add time or in settings; composition is `base → tag.prompt → per-feed custom`. |
 | **Cut defaults** | New installs / reset defaults: `fade_ms=0` (was 3000), `min_ad_segment_length_seconds=5` (was 14), `min_confidence=0.7` (was 0.8). Existing DB values are unchanged until you update Output settings. |
 | **Client poll freshness** | Feed list shows `Last fetched … via {client}` from the podcast app User-Agent that last requested the Podly RSS URL. |
 | **Upstream freshness** | `last_fetched_at` (Podly → publisher RSS) is shown on the feed detail pane as `Upstream RSS refreshed …`. |
