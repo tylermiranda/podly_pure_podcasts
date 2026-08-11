@@ -450,3 +450,26 @@ def touch_feed_access_token_action(params: dict[str, Any]) -> dict[str, Any]:
         token.token_secret = str(secret_value)
     db.session.flush()
     return {"updated": True}
+
+
+def record_feed_client_poll_action(params: dict[str, Any]) -> dict[str, Any]:
+    """Stamp when a podcast client last requested a feed's Podly RSS URL."""
+    feed_id = params.get("feed_id")
+    client_name = params.get("client_name")
+    if not feed_id:
+        raise ValueError("feed_id is required")
+    if not client_name or not isinstance(client_name, str):
+        raise ValueError("client_name is required")
+
+    feed = db.session.get(Feed, int(feed_id))
+    if not feed:
+        raise ValueError(f"Feed {feed_id} not found")
+
+    feed.last_client_polled_at = datetime.now(UTC).replace(tzinfo=None)
+    feed.last_client_name = client_name.strip()[:64]
+    db.session.flush()
+    return {
+        "feed_id": feed.id,
+        "last_client_polled_at": feed.last_client_polled_at.isoformat(),
+        "last_client_name": feed.last_client_name,
+    }

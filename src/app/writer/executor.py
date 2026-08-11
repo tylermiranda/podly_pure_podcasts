@@ -51,6 +51,9 @@ class CommandExecutor:
             "reassign_pending_jobs", writer_actions.reassign_pending_jobs_action
         )
         self.register_action("refresh_feed", writer_actions.refresh_feed_action)
+        self.register_action(
+            "record_feed_client_poll", writer_actions.record_feed_client_poll_action
+        )
         self.register_action("add_feed", writer_actions.add_feed_action)
         self.register_action(
             "update_feed_settings", writer_actions.update_feed_settings_action

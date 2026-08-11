@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { feedsApi } from '../services/api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { feedsApi, tagsApi } from '../services/api';
 import { WHISPER_LANGUAGES } from '../constants/whisperLanguages';
 import type { Feed, FeedSettingsUpdate } from '../types';
+import TagsManagerModal from './TagsManagerModal';
 
 interface FeedSettingsModalProps {
   feed: Feed;
@@ -53,6 +54,16 @@ export default function FeedSettingsModal({
   const [customLlmAdPrompt, setCustomLlmAdPrompt] = useState<string>(
     feed.custom_llm_ad_prompt || ''
   );
+  const [promptTagId, setPromptTagId] = useState<number | ''>(
+    feed.prompt_tag_id ?? ''
+  );
+  const [showTagsManager, setShowTagsManager] = useState(false);
+
+  const { data: tags = [] } = useQuery({
+    queryKey: ['tags'],
+    queryFn: tagsApi.list,
+    enabled: isOpen,
+  });
 
   useEffect(() => {
     setStrategy(feed.ad_detection_strategy || 'llm');
@@ -73,6 +84,7 @@ export default function FeedSettingsModal({
     );
     setLanguageOverride(feed.language ?? '');
     setCustomLlmAdPrompt(feed.custom_llm_ad_prompt || '');
+    setPromptTagId(feed.prompt_tag_id ?? '');
   }, [feed, llmChapterFallbackGlobalDefault]);
 
   const updateMutation = useMutation({
@@ -133,6 +145,12 @@ export default function FeedSettingsModal({
     const currentCustomPrompt = feed.custom_llm_ad_prompt || '';
     if (customLlmAdPrompt !== currentCustomPrompt) {
       settings.custom_llm_ad_prompt = customLlmAdPrompt || null;
+    }
+
+    const currentPromptTagId = feed.prompt_tag_id ?? null;
+    const nextPromptTagId = promptTagId === '' ? null : promptTagId;
+    if (nextPromptTagId !== currentPromptTagId) {
+      settings.prompt_tag_id = nextPromptTagId;
     }
 
     if (Object.keys(settings).length === 0) {
@@ -304,6 +322,39 @@ export default function FeedSettingsModal({
           </div>
 
           <div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Prompt tag
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowTagsManager(true)}
+                className="text-xs font-medium text-blue-700 hover:text-blue-900"
+              >
+                Manage tags
+              </button>
+            </div>
+            <select
+              value={promptTagId === '' ? '' : String(promptTagId)}
+              onChange={(e) =>
+                setPromptTagId(e.target.value === '' ? '' : Number(e.target.value))
+              }
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            >
+              <option value="">None</option>
+              {tags.map((tag) => (
+                <option key={tag.id} value={tag.id}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Shared prompt template for a production company or pattern. Applied
+              before the per-feed instructions below.
+            </p>
+          </div>
+
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Custom Ad Detection Instructions
             </label>
@@ -315,9 +366,8 @@ export default function FeedSettingsModal({
               className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Optional custom instructions appended to the LLM system prompt
-              for ad detection. Use this to guide the LLM based on your
-              podcast's specific ad patterns.
+              Optional custom instructions appended after the prompt tag (if any)
+              to the LLM system prompt for ad detection.
             </p>
           </div>
 
@@ -373,6 +423,11 @@ export default function FeedSettingsModal({
           </button>
         </div>
       </div>
+
+      <TagsManagerModal
+        isOpen={showTagsManager}
+        onClose={() => setShowTagsManager(false)}
+      />
     </div>
   );
 }

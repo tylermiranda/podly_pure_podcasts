@@ -122,7 +122,7 @@ def test_add_feed_with_language_on_new_feed(app):
         client = _make_client(app)
         url = "http://example.com/add-lang.rss"
 
-        def fake_add_or_refresh(_url, language=None):
+        def fake_add_or_refresh(_url, language=None, prompt_tag_id=None):
             assert language == "de"
             feed = Feed(title="New Feed", rss_url=_url, language=language)
             db.session.add(feed)
@@ -280,7 +280,7 @@ def test_add_feed_writer_failure_returns_500_before_enqueue(app):
         url = "http://example.com/add-writer-fail.rss"
         created: dict[str, Feed] = {}
 
-        def fake_add_or_refresh(_url, language=None):
+        def fake_add_or_refresh(_url, language=None, prompt_tag_id=None):
             feed = Feed(title="WF", rss_url=_url)
             db.session.add(feed)
             db.session.commit()

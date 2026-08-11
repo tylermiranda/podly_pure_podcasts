@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Feed } from '../types';
 import { WHISPER_LANGUAGE_NAMES } from '../constants/whisperLanguages';
 import type { FeedSortOption } from '../utils/feedListSort';
-import { formatLastFetchedLabel } from '../utils/relativeTime';
+import { formatClientFetchedLabel } from '../utils/relativeTime';
 
 function getLatestEpisodeTimestamp(feed: Feed): number | null {
   if (!feed.latest_episode_release_date) {
@@ -251,9 +251,9 @@ export default function FeedList({
                     <div
                       className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 dark:text-slate-400"
                       title={
-                        feed.last_fetched_at
-                          ? new Date(feed.last_fetched_at).toLocaleString()
-                          : 'This feed has not been fetched yet'
+                        feed.last_client_polled_at
+                          ? new Date(feed.last_client_polled_at).toLocaleString()
+                          : 'No podcast client has requested this Podly feed yet'
                       }
                     >
                       <svg
@@ -270,7 +270,17 @@ export default function FeedList({
                         <path d="M4 4a16 16 0 0 1 16 16" />
                         <circle cx="5" cy="19" r="1" fill="currentColor" stroke="none" />
                       </svg>
-                      <span>{formatLastFetchedLabel(feed.last_fetched_at)}</span>
+                      <span>
+                        {formatClientFetchedLabel(
+                          feed.last_client_polled_at,
+                          feed.last_client_name
+                        )}
+                      </span>
+                      {feed.prompt_tag?.name && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-950 dark:text-indigo-300 dark:border-indigo-800">
+                          {feed.prompt_tag.name}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

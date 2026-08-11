@@ -27,11 +27,13 @@ from flask.typing import ResponseReturnValue
 from app.auth import is_auth_enabled
 from app.auth.guards import require_admin
 from app.auth.service import update_user_last_active
+from app.client_user_agent import normalize_client_user_agent
 from app.extensions import db
 from app.feeds import (
     _get_base_url,
     add_or_refresh_feed,
     ensure_requested_feed_language,
+    ensure_requested_feed_prompt_tag,
     generate_aggregate_feed_xml,
     generate_feed_xml,
     is_feed_active_for_user,
@@ -40,6 +42,7 @@ from app.feeds import (
 from app.jobs_manager import get_jobs_manager
 from app.models import (
     Feed,
+    Tag,
     User,
     UserFeed,
 )
@@ -72,6 +75,10 @@ _BACKGROUND_REFRESH_LOCK = Lock()
 _BACKGROUND_REFRESH_LAST_KICKOFF: dict[int, float] = {}
 _AUTO_REFRESH_COOLDOWN_SECONDS = 60.0
 
+_CLIENT_POLL_LOCK = Lock()
+_CLIENT_POLL_LAST_STAMP: dict[tuple[int, str], float] = {}
+_CLIENT_POLL_COOLDOWN_SECONDS = 600.0
+
 
 def _parse_optional_feed_bool(
     payload: dict[str, Any],
@@ -92,28 +99,23 @@ def _parse_optional_feed_bool(
     return value, None
 
 
-def _build_feed_settings_updates(
-    feed: Feed,
+def _apply_strategy_and_filter_updates(
     payload: dict[str, Any],
-) -> tuple[dict[str, Any] | None, ResponseReturnValue | None]:
-    updates: dict[str, Any] = {}
-
+    updates: dict[str, Any],
+) -> ResponseReturnValue | None:
     if "ad_detection_strategy" in payload:
         strategy = payload["ad_detection_strategy"]
         if strategy not in ("llm", "chapter", "chapter_insert"):
             return (
-                None,
-                (
-                    jsonify(
-                        {
-                            "error": (
-                                "Invalid ad_detection_strategy. Must be "
-                                "'llm', 'chapter', or 'chapter_insert'"
-                            )
-                        }
-                    ),
-                    400,
+                jsonify(
+                    {
+                        "error": (
+                            "Invalid ad_detection_strategy. Must be "
+                            "'llm', 'chapter', or 'chapter_insert'"
+                        )
+                    }
                 ),
+                400,
             )
         updates["ad_detection_strategy"] = strategy
 
@@ -121,15 +123,22 @@ def _build_feed_settings_updates(
         filter_strings = payload["chapter_filter_strings"]
         if filter_strings is not None and not isinstance(filter_strings, str):
             return (
-                None,
-                (
-                    jsonify(
-                        {"error": "chapter_filter_strings must be a string or null"}
-                    ),
-                    400,
-                ),
+                jsonify({"error": "chapter_filter_strings must be a string or null"}),
+                400,
             )
         updates["chapter_filter_strings"] = filter_strings
+    return None
+
+
+def _build_feed_settings_updates(
+    feed: Feed,
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any] | None, ResponseReturnValue | None]:
+    updates: dict[str, Any] = {}
+
+    strategy_error = _apply_strategy_and_filter_updates(payload, updates)
+    if strategy_error is not None:
+        return None, strategy_error
 
     chapter_fallback_enabled, error_response = _parse_optional_feed_bool(
         payload,
@@ -149,29 +158,17 @@ def _build_feed_settings_updates(
     if auto_whitelist_override is not _MISSING:
         updates["auto_whitelist_new_episodes_override"] = auto_whitelist_override
 
-    if "language" in payload:
-        try:
-            updates["language"] = normalize_whisper_language(payload.get("language"))
-        except ValueError:
-            return (
-                None,
-                (
-                    jsonify({"error": whisper_language_error("null")}),
-                    400,
-                ),
-            )
+    language_error = _apply_language_update(payload, updates)
+    if language_error is not None:
+        return None, language_error
 
-    if "custom_llm_ad_prompt" in payload:
-        custom_prompt = payload["custom_llm_ad_prompt"]
-        if custom_prompt is not None and not isinstance(custom_prompt, str):
-            return (
-                None,
-                (
-                    jsonify({"error": "custom_llm_ad_prompt must be a string or null"}),
-                    400,
-                ),
-            )
-        updates["custom_llm_ad_prompt"] = custom_prompt
+    custom_prompt_error = _apply_custom_llm_ad_prompt_update(payload, updates)
+    if custom_prompt_error is not None:
+        return None, custom_prompt_error
+
+    prompt_tag_error = _apply_prompt_tag_id_update(payload, updates)
+    if prompt_tag_error is not None:
+        return None, prompt_tag_error
 
     resolved_strategy = updates.get(
         "ad_detection_strategy",
@@ -220,6 +217,10 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
     except ValueError:
         return make_response((whisper_language_error("empty"), 400))
 
+    prompt_tag_id, prompt_tag_error = _parse_form_prompt_tag_id()
+    if prompt_tag_error is not None:
+        return prompt_tag_error
+
     url = fix_url(url)
 
     if current_app.config.get("developer_mode") and url.startswith("http://test-feed/"):
@@ -234,8 +235,9 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
             if allowance_error:
                 return allowance_error
 
-        feed = add_or_refresh_feed(url, language=language)
+        feed = add_or_refresh_feed(url, language=language, prompt_tag_id=prompt_tag_id)
         ensure_requested_feed_language(feed, language)
+        ensure_requested_feed_prompt_tag(feed, prompt_tag_id)
         if user:
             created, previous_count = ensure_user_feed_membership(feed, user.id)
             if created and previous_count == 0:
@@ -384,6 +386,85 @@ def search_feeds() -> ResponseReturnValue:
     )
 
 
+def _apply_language_update(
+    payload: dict[str, Any],
+    updates: dict[str, Any],
+) -> ResponseReturnValue | None:
+    if "language" not in payload:
+        return None
+    try:
+        updates["language"] = normalize_whisper_language(payload.get("language"))
+    except ValueError:
+        return (jsonify({"error": whisper_language_error("null")}), 400)
+    return None
+
+
+def _apply_custom_llm_ad_prompt_update(
+    payload: dict[str, Any],
+    updates: dict[str, Any],
+) -> ResponseReturnValue | None:
+    if "custom_llm_ad_prompt" not in payload:
+        return None
+    custom_prompt = payload["custom_llm_ad_prompt"]
+    if custom_prompt is not None and not isinstance(custom_prompt, str):
+        return (
+            jsonify({"error": "custom_llm_ad_prompt must be a string or null"}),
+            400,
+        )
+    updates["custom_llm_ad_prompt"] = custom_prompt
+    return None
+
+
+def _validate_prompt_tag_id(
+    prompt_tag_id: Any,
+) -> tuple[int | None, ResponseReturnValue | None]:
+    """Validate a prompt_tag_id value. Returns (value, error_response)."""
+    if prompt_tag_id is None:
+        return None, None
+    if not isinstance(prompt_tag_id, int):
+        return (
+            None,
+            (
+                jsonify({"error": "prompt_tag_id must be an integer or null"}),
+                400,
+            ),
+        )
+    if db.session.get(Tag, prompt_tag_id) is None:
+        return (
+            None,
+            (jsonify({"error": "prompt_tag_id does not reference a tag"}), 400),
+        )
+    return prompt_tag_id, None
+
+
+def _parse_form_prompt_tag_id() -> tuple[int | None, ResponseReturnValue | None]:
+    """Parse optional prompt_tag_id from form data. Empty/missing → None."""
+    raw = request.form.get("prompt_tag_id")
+    if raw is None or str(raw).strip() == "":
+        return None, None
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return (
+            None,
+            (jsonify({"error": "prompt_tag_id must be an integer or null"}), 400),
+        )
+    return _validate_prompt_tag_id(value)
+
+
+def _apply_prompt_tag_id_update(
+    payload: dict[str, Any],
+    updates: dict[str, Any],
+) -> ResponseReturnValue | None:
+    if "prompt_tag_id" not in payload:
+        return None
+    prompt_tag_id, error = _validate_prompt_tag_id(payload["prompt_tag_id"])
+    if error is not None:
+        return error
+    updates["prompt_tag_id"] = prompt_tag_id
+    return None
+
+
 def _should_kickoff_async_refresh(feed_id: int) -> bool:
     """True iff the per-feed cooldown has elapsed; reserves the next slot."""
     now = time.monotonic()
@@ -393,6 +474,34 @@ def _should_kickoff_async_refresh(feed_id: int) -> bool:
             return False
         _BACKGROUND_REFRESH_LAST_KICKOFF[feed_id] = now
         return True
+
+
+def _should_record_client_poll(feed_id: int, client_name: str) -> bool:
+    """True iff we should stamp a client poll for this feed+name (debounced)."""
+    now = time.monotonic()
+    key = (feed_id, client_name)
+    with _CLIENT_POLL_LOCK:
+        last = _CLIENT_POLL_LAST_STAMP.get(key)
+        if last is not None and now - last < _CLIENT_POLL_COOLDOWN_SECONDS:
+            return False
+        _CLIENT_POLL_LAST_STAMP[key] = now
+        return True
+
+
+def _maybe_record_client_poll(feed_id: int) -> None:
+    client_name = normalize_client_user_agent(request.headers.get("User-Agent"))
+    if not client_name:
+        return
+    if not _should_record_client_poll(feed_id, client_name):
+        return
+    try:
+        writer_client.action(
+            "record_feed_client_poll",
+            {"feed_id": feed_id, "client_name": client_name},
+            wait=False,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to record client poll for feed %s: %s", feed_id, e)
 
 
 def _spawn_async_refresh(app: Flask, feed_id: int) -> None:
@@ -418,6 +527,8 @@ def get_feed(f_id: int) -> Response:
     if _should_kickoff_async_refresh(f_id):
         app = cast(Any, current_app)._get_current_object()
         _spawn_async_refresh(app, f_id)
+
+    _maybe_record_client_poll(f_id)
 
     xml_content = generate_feed_xml(feed)
 
@@ -625,6 +736,7 @@ def get_feed_by_alt_or_url(something_or_rss: str) -> Response:
             pass
     feed = Feed.query.filter_by(rss_url=something_or_rss).first()
     if feed:
+        _maybe_record_client_poll(feed.id)
         xml_content = generate_feed_xml(feed)
         response = make_response(xml_content)
         response.headers["Content-Type"] = "application/rss+xml"
@@ -965,6 +1077,8 @@ def _serialize_feed(
             is_active_subscription = True
 
     last_fetched_at = getattr(feed, "last_fetched_at", None)
+    last_client_polled_at = getattr(feed, "last_client_polled_at", None)
+    prompt_tag = getattr(feed, "prompt_tag", None)
     feed_payload = {
         "id": feed.id,
         "title": feed.title,
@@ -981,6 +1095,12 @@ def _serialize_feed(
         "last_fetched_at": (
             last_fetched_at.isoformat() if last_fetched_at is not None else None
         ),
+        "last_client_polled_at": (
+            last_client_polled_at.isoformat()
+            if last_client_polled_at is not None
+            else None
+        ),
+        "last_client_name": getattr(feed, "last_client_name", None),
         "member_count": len(member_ids),
         "is_member": is_member,
         "is_active_subscription": is_active_subscription,
@@ -990,5 +1110,15 @@ def _serialize_feed(
             feed, "enable_llm_chapter_fallback_tagging", None
         ),
         "custom_llm_ad_prompt": getattr(feed, "custom_llm_ad_prompt", None),
+        "prompt_tag_id": getattr(feed, "prompt_tag_id", None),
+        "prompt_tag": (
+            {
+                "id": prompt_tag.id,
+                "name": prompt_tag.name,
+                "prompt": prompt_tag.prompt,
+            }
+            if prompt_tag is not None
+            else None
+        ),
     }
     return feed_payload

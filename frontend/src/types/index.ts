@@ -1,3 +1,11 @@
+export interface PromptTag {
+  id: number;
+  name: string;
+  prompt?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface Feed {
   id: number;
   rss_url: string;
@@ -8,6 +16,8 @@ export interface Feed {
   posts_count: number;
   latest_episode_release_date?: string | null;
   last_fetched_at?: string | null;
+  last_client_polled_at?: string | null;
+  last_client_name?: string | null;
   member_count?: number;
   is_member?: boolean;
   is_active_subscription?: boolean;
@@ -17,6 +27,8 @@ export interface Feed {
   auto_whitelist_new_episodes_override?: boolean | null;
   language?: string | null;
   custom_llm_ad_prompt?: string | null;
+  prompt_tag_id?: number | null;
+  prompt_tag?: PromptTag | null;
 }
 
 export interface FeedSettingsUpdate {
@@ -26,6 +38,7 @@ export interface FeedSettingsUpdate {
   auto_whitelist_new_episodes_override?: boolean | null;
   language?: string | null;
   custom_llm_ad_prompt?: string | null;
+  prompt_tag_id?: number | null;
 }
 
 export interface Episode {

@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { feedsApi } from '../services/api';
+import { useQuery } from '@tanstack/react-query';
+import { feedsApi, tagsApi } from '../services/api';
 import type { PodcastSearchResult } from '../types';
 import { diagnostics, emitDiagnosticError } from '../utils/diagnostics';
 import { getHttpErrorInfo } from '../utils/httpError';
 import { WHISPER_LANGUAGES } from '../constants/whisperLanguages';
+import TagsManagerModal from './TagsManagerModal';
 
 interface AddFeedFormProps {
   onSuccess: () => void;
@@ -18,6 +20,8 @@ const PAGE_SIZE = 10;
 export default function AddFeedForm({ onSuccess, onUpgradePlan, planLimitReached }: AddFeedFormProps) {
   const [url, setUrl] = useState('');
   const [language, setLanguage] = useState('');
+  const [promptTagId, setPromptTagId] = useState<number | ''>('');
+  const [showTagsManager, setShowTagsManager] = useState(false);
   const [activeMode, setActiveMode] = useState<AddMode>('search');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -31,6 +35,11 @@ export default function AddFeedForm({ onSuccess, onUpgradePlan, planLimitReached
   const [searchPage, setSearchPage] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
   const [hasSearched, setHasSearched] = useState(false);
+
+  const { data: tags = [] } = useQuery({
+    queryKey: ['tags'],
+    queryFn: tagsApi.list,
+  });
 
   const resetSearchState = () => {
     setSearchResults([]);
@@ -60,12 +69,22 @@ export default function AddFeedForm({ onSuccess, onUpgradePlan, planLimitReached
     setUpgradePrompt(null);
 
     try {
-      diagnostics.add('info', 'Add feed request', { source, hasUrl: !!feedUrl, hasLanguage: !!language });
-      await feedsApi.addFeed(feedUrl, language || null);
+      diagnostics.add('info', 'Add feed request', {
+        source,
+        hasUrl: !!feedUrl,
+        hasLanguage: !!language,
+        hasPromptTag: promptTagId !== '',
+      });
+      await feedsApi.addFeed(
+        feedUrl,
+        language || null,
+        promptTagId === '' ? null : promptTagId
+      );
       if (source === 'url') {
         setUrl('');
       }
       setLanguage('');
+      setPromptTagId('');
       diagnostics.add('info', 'Add feed success', { source });
       onSuccess();
     } catch (err) {
@@ -224,6 +243,40 @@ export default function AddFeedForm({ onSuccess, onUpgradePlan, planLimitReached
           {WHISPER_LANGUAGES.map((lang) => (
             <option key={lang.code} value={lang.code}>
               {lang.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mb-4">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <label htmlFor="new-feed-prompt-tag" className="block text-sm font-medium text-gray-700">
+            Prompt tag (optional)
+          </label>
+          <button
+            type="button"
+            onClick={() => setShowTagsManager(true)}
+            className="text-xs font-medium text-blue-700 hover:text-blue-900"
+          >
+            Manage tags
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-1">
+          Shared ad-detection instructions for this production company / pattern.
+        </p>
+        <select
+          id="new-feed-prompt-tag"
+          value={promptTagId === '' ? '' : String(promptTagId)}
+          onChange={(e) =>
+            setPromptTagId(e.target.value === '' ? '' : Number(e.target.value))
+          }
+          disabled={!!planLimitReached}
+          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        >
+          <option value="">None</option>
+          {tags.map((tag) => (
+            <option key={tag.id} value={tag.id}>
+              {tag.name}
             </option>
           ))}
         </select>
@@ -394,6 +447,11 @@ export default function AddFeedForm({ onSuccess, onUpgradePlan, planLimitReached
           )}
         </div>
       )}
+
+      <TagsManagerModal
+        isOpen={showTagsManager}
+        onClose={() => setShowTagsManager(false)}
+      />
     </div>
   );
 }

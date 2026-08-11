@@ -70,3 +70,31 @@ export function formatLastFetchedLabel(
   }
   return `Last fetched ${formatRelativeTime(lastFetchedAt, now)}`;
 }
+
+/** Label for when a podcast app last requested the Podly RSS URL. */
+export function formatClientFetchedLabel(
+  lastClientPolledAt: string | null | undefined,
+  clientName: string | null | undefined,
+  now: Date = new Date()
+): string {
+  if (!lastClientPolledAt) {
+    return 'Not fetched yet';
+  }
+  const relative = formatRelativeTime(lastClientPolledAt, now);
+  const trimmedName = clientName?.trim();
+  if (trimmedName) {
+    return `Last fetched ${relative} via ${trimmedName}`;
+  }
+  return `Last fetched ${relative}`;
+}
+
+/** Label for when Podly last refreshed the upstream publisher RSS. */
+export function formatUpstreamRefreshedLabel(
+  lastFetchedAt: string | null | undefined,
+  now: Date = new Date()
+): string {
+  if (!lastFetchedAt) {
+    return 'Upstream RSS not refreshed yet';
+  }
+  return `Upstream RSS refreshed ${formatRelativeTime(lastFetchedAt, now)}`;
+}

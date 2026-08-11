@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useConfigContext } from '../ConfigContext';
 import { Section, Field, ConnectionStatusCard } from '../shared';
 import type { WhisperConfig, LLMConfig } from '../../../types';
+import PromptTagsPanel from '../../PromptTagsPanel';
 
 export default function DefaultTab() {
   const {
@@ -116,6 +117,14 @@ export default function DefaultTab() {
             />
           </div>
         </Field>
+      </Section>
+
+      <Section title="Prompt Tags">
+        <p className="text-sm text-gray-600">
+          Reusable ad-detection prompts (e.g. noiser) shared across feeds. Assign one
+          tag per feed in Feed Settings or when adding a podcast.
+        </p>
+        <PromptTagsPanel />
       </Section>
 
       {/* Input styling */}

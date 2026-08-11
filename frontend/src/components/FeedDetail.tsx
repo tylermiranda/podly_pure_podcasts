@@ -13,6 +13,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { copyToClipboard } from '../utils/clipboard';
 import { emitDiagnosticError } from '../utils/diagnostics';
 import { getHttpErrorInfo } from '../utils/httpError';
+import { formatUpstreamRefreshedLabel } from '../utils/relativeTime';
 
 interface FeedDetailProps {
   feed: Feed;
@@ -700,6 +701,23 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                 <div className="mt-2 text-sm text-gray-500">
                   <span>{totalCount} episodes visible</span>
                 </div>
+                <div
+                  className="mt-1 text-sm text-gray-500"
+                  title={
+                    currentFeed.last_fetched_at
+                      ? new Date(currentFeed.last_fetched_at).toLocaleString()
+                      : 'Podly has not refreshed the upstream RSS for this feed yet'
+                  }
+                >
+                  {formatUpstreamRefreshedLabel(currentFeed.last_fetched_at)}
+                </div>
+                {currentFeed.prompt_tag?.name && (
+                  <div className="mt-2">
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold uppercase bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      {currentFeed.prompt_tag.name}
+                    </span>
+                  </div>
+                )}
                 {requireAuth && isAdmin && (
                   <div className="mt-2 flex items-center gap-2 flex-wrap text-sm">
                     <button
