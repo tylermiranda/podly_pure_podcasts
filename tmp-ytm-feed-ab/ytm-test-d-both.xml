@@ -1,6 +1,22 @@
 <?xml version='1.0' encoding='utf-8'?>
-<rss xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><title>[YTM-TEST-D both] History of the 90s</title><link>https://feeds.acast.com/public/shows/69e7d0abd2febdbec9d567a0</link><description>On History of the 90’s we travel back in time through the stories that defined a decade. The last 10 years of the 20th century was a time like no other, from Columbine to Ruth Bader Ginsburg to Seinfeld, Air Jordan, and the Spice Girls …if it happened in the 90’s you’ll hear about it on this podcast. Join Kathy Kenzora as we journey through the History of the 90's every other Wednesday. Hosted on Acast. See acast.com/privacy for more information.</description><language>en-us</language><lastBuildDate>Tue, 11 Aug 2026 16:52:36 GMT</lastBuildDate><generator>YTM A/B Test D: itunes tags + clean audio URLs</generator><itunes:author>Kathy Kenzora</itunes:author><itunes:image href="https://assets.pippa.io/shows/69e7d0abd2febdbec9d567a0/1785929050908-f90ca207-eebb-4bc3-b49e-c48c10b2b3a1.jpeg" /><image><url>https://assets.pippa.io/shows/69e7d0abd2febdbec9d567a0/1785929050908-f90ca207-eebb-4bc3-b49e-c48c10b2b3a1.jpeg</url><title>History of the 90s</title><link>https://feeds.acast.com/public/shows/69e7d0abd2febdbec9d567a0</link></image><itunes:category text="History" /><itunes:category text="Society &amp; Culture" /><itunes:category text="Society &amp; Culture"><itunes:category text="Documentary" /></itunes:category>
-        <itunes:explicit>false</itunes:explicit><item>
+<rss xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" version="2.0">
+    <channel>
+        <title>[YTM-TEST-D both] History of the 90s</title>
+        <description>On History of the 90’s we travel back in time through the stories that defined a decade. The last 10 years of the 20th century was a time like no other, from Columbine to Ruth Bader Ginsburg to Seinfeld, Air Jordan, and the Spice Girls …if it happened in the 90’s you’ll hear about it on this podcast. Join Kathy Kenzora as we journey through the History of the 90's every other Wednesday. Hosted on Acast. See acast.com/privacy for more information.</description>
+        <link>https://feeds.acast.com/public/shows/69e7d0abd2febdbec9d567a0</link>
+        <language>en-us</language>
+        <lastBuildDate>Tue, 11 Aug 2026 16:52:36 GMT</lastBuildDate>
+        <generator>YTM A/B Test D: itunes tags + clean audio URLs</generator>
+        <itunes:author>Kathy Kenzora</itunes:author>
+        <itunes:image href="https://assets.pippa.io/shows/69e7d0abd2febdbec9d567a0/1785929050908-f90ca207-eebb-4bc3-b49e-c48c10b2b3a1.jpeg" />
+        <image>
+            <url>https://assets.pippa.io/shows/69e7d0abd2febdbec9d567a0/1785929050908-f90ca207-eebb-4bc3-b49e-c48c10b2b3a1.jpeg</url>
+            <title>History of the 90s:  The Tupac Murder Trial</title>
+            <link>https://feeds.acast.com/public/shows/69e7d0abd2febdbec9d567a0</link>
+        </image>
+        <itunes:category text="History" /><itunes:category text="Society &amp; Culture" /><itunes:category text="Society &amp; Culture"><itunes:category text="Documentary" /></itunes:category>
+        <itunes:explicit>false</itunes:explicit>
+        <item>
             <title>Jury Selection at the Tupac Murder Trial: Sean Diddy Combs Gets Mentioned</title>
             <description>Jury selection has started at the Las Vegas murder trial for Duane Keefe D Davis and lot’s happened on day one including a few unexpected mentions of Sean Diddy Combs. Plus Davis waived his right to be sentenced by a jury if he is found guilty of first degree murder in connection with the drive-by shooting that killed rapper Tupac Shakur in September 1996. Show info: Instagram: @that90spodcast Email: 1995podcast@gmail.com Substack: @historyofthe90s Hosted on Acast. See acast.com/privacy for more information.
 
@@ -40,4 +56,5 @@ Report a missed ad: https://zeroads.ai/report?guid=d42fa992-11f9-5738-ba27-69378
             <itunes:duration>00:36:19</itunes:duration>
             <itunes:image href="https://assets.pippa.io/shows/69e7d0abd2febdbec9d567a0/1785929050908-f90ca207-eebb-4bc3-b49e-c48c10b2b3a1.jpeg" />
         </item>
-    </channel></rss>
+    </channel>
+</rss>
