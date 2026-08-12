@@ -79,6 +79,46 @@ def test_get_ad_segments(app: Flask) -> None:
             assert segments[0] == (0.0, 10.0)
 
 
+def test_get_ad_segments_trims_mixed_whisper_chunk(app: Flask) -> None:
+    post = Post(id=1, title="Test Post")
+    segment = TranscriptSegment(
+        id=1,
+        post_id=1,
+        sequence_num=0,
+        start_time=158.5,
+        end_time=174.1,
+        text=(
+            "ACAST.com Welcome to the Tupac Murder Trial from the history of the 90s. "
+            "I'm your host, Kathy Kanzora."
+        ),
+    )
+    identification = Identification(
+        transcript_segment_id=1, model_call_id=1, label="ad", confidence=0.95
+    )
+
+    with app.app_context():
+        mock_identification_query = MagicMock()
+        mock_query_chain = MagicMock()
+        mock_identification_query.join.return_value = mock_query_chain
+        mock_query_chain.join.return_value = mock_query_chain
+        mock_query_chain.filter.return_value = mock_query_chain
+        mock_query_chain.all.return_value = [identification]
+
+        processor = AudioProcessor(
+            config=create_standard_test_config(),
+            identification_query=mock_identification_query,
+        )
+
+        with patch.object(identification, "transcript_segment", segment):
+            segments = processor.get_ad_segments(post)
+
+        assert len(segments) == 1
+        start, end = segments[0]
+        assert start == 158.5
+        assert end < 165.0
+        assert segment.end_time == 174.1
+
+
 def test_merge_ad_segments(
     test_processor_with_mocks: AudioProcessor,
 ) -> None:

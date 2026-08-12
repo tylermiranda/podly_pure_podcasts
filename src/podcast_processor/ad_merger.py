@@ -157,23 +157,17 @@ class AdMerger:
         return refined
 
     def _should_merge(self, group1: AdGroup, group2: AdGroup) -> bool:
-        """Check if groups belong to same sponsor"""
-        # High confidence → merge
-        if group1.confidence_avg >= 0.9 and group2.confidence_avg >= 0.9:
-            return True
+        """Check if groups belong to same sponsor.
 
-        # Shared keywords (URL or brand)
+        Do not merge solely because both sides are high-confidence: Flash-class
+        models over-score content, and that used to swallow the show between ads.
+        """
         shared = set(group1.keywords) & set(group2.keywords)
         if len(shared) >= 1:
             return True
 
-        # Small gap with good confidence
         gap = group2.start_time - group1.end_time
-        if (
-            gap <= 10.0
-            and group1.confidence_avg >= 0.8
-            and group2.confidence_avg >= 0.8
-        ):
+        if gap <= 3.0 and group1.confidence_avg >= 0.8 and group2.confidence_avg >= 0.8:
             return True
 
         return False

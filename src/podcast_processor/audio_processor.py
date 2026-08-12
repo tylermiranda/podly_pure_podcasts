@@ -6,6 +6,7 @@ from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
 from podcast_processor.ad_merger import AdMerger
 from podcast_processor.audio import clip_segments_with_fade, get_audio_duration_ms
+from podcast_processor.content_guard import ad_cut_window
 from shared.config import Config
 
 
@@ -81,14 +82,35 @@ class AudioProcessor:
         valid_identifications = []
         for ident in ad_identifications:
             segment = ident.transcript_segment
-            if segment:
-                ad_segments_with_text.append(segment)
-                valid_identifications.append(ident)
-            else:
+            if not segment:
                 # This should ideally not happen if DB integrity is maintained
                 self.logger.warning(
                     f"Identification {ident.id} for post {post.id} refers to a missing TranscriptSegment {ident.transcript_segment_id}. Skipping."
                 )
+                continue
+            orig_start = float(segment.start_time or 0.0)
+            orig_end = float(segment.end_time or 0.0)
+            window = ad_cut_window(orig_start, orig_end, segment.text or "")
+            if window is None:
+                self.logger.info(
+                    "Dropping content-only ad label for post %s segment %s",
+                    post.id,
+                    segment.id,
+                )
+                continue
+            if window != (orig_start, orig_end):
+                cut_segment = TranscriptSegment(
+                    id=segment.id,
+                    post_id=segment.post_id,
+                    sequence_num=segment.sequence_num,
+                    start_time=window[0],
+                    end_time=window[1],
+                    text=segment.text,
+                )
+            else:
+                cut_segment = segment
+            ad_segments_with_text.append(cut_segment)
+            valid_identifications.append(ident)
 
         if not ad_segments_with_text:
             self.logger.info(

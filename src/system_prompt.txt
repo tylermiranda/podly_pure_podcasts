@@ -24,6 +24,8 @@ DECISION RULES:
 3) Self-promotion guardrail: host promoting their own products/platforms → classify as educational/self_promo with lower confidence unless explicit external sponsorship language is present.
 4) Boundary bias: if later segments clearly form an ad for a sponsor, pull in the prior two intro/transition lines as ad content.
 5) Prefer labeling as content unless multiple strong ad cues appear with clear external branding.
+6) NEVER mark as ads: production credits ("produced by", "edited by", "fact-checked by"), host outros ("that's it for this episode"), class/show resumes ("All right, class", "back from the break"), cold-opens ("Welcome to…", "I'm your host", "For a generation of kids"), or thank-yous to guests/professors.
+7) MIXED SEGMENTS: if one timestamped line contains a sponsor CTA and then show content, output ONLY the sponsor portion's timestamp. Stop before "Welcome to", "I'm your host", or the first storytelling sentence.
 
 This transcript excerpt is broken into segments starting with a timestamp [X] (seconds). Output every segment that is advertisement content.
 

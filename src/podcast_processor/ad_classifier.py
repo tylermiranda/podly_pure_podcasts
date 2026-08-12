@@ -15,6 +15,7 @@ from app.extensions import db
 from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
 from podcast_processor.boundary_refiner import BoundaryRefiner
+from podcast_processor.content_guard import is_content_only
 from podcast_processor.cue_detector import CueDetector
 from podcast_processor.llm_concurrency_limiter import (
     ConcurrencyContext,
@@ -841,6 +842,15 @@ class AdClassifier:
                 )
                 continue
 
+            if is_content_only(matched_segment.text or ""):
+                self.logger.info(
+                    "Skipping content-only ad prediction at %.2fs for post %s: %s",
+                    pred.segment_offset,
+                    model_call.post_id,
+                    (matched_segment.text or "")[:120],
+                )
+                continue
+
             if matched_segment.id in processed_segment_ids:
                 continue
 
@@ -923,6 +933,8 @@ class AdClassifier:
         start_index = max(0, matched_index - 3)
         for seg in current_chunk_db_segments[start_index:matched_index]:
             if seg.id in processed_segment_ids:
+                continue
+            if is_content_only(seg.text or ""):
                 continue
             if self._segment_has_ad_identification(seg.id):
                 continue
@@ -1296,6 +1308,8 @@ class AdClassifier:
                     continue
 
                 text = seg.text or ""
+                if is_content_only(text):
+                    continue
                 signals = self.cue_detector.analyze(text)
                 has_strong_cue = (
                     signals["url"]

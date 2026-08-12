@@ -324,9 +324,41 @@ def test_compute_next_overlap_segments_baseline_overlap_without_ads(
     assert [seg.sequence_num for seg in result] == [4, 5, 6, 7]
 
 
-def test_create_identifications_skips_existing_ad_label(
+def test_create_identifications_skips_content_only_label(
     test_classifier_with_mocks: AdClassifier,
 ) -> None:
+    classifier = test_classifier_with_mocks
+    mock_query = classifier.identification_query
+    mock_query.filter_by.return_value.first.return_value = None
+
+    segment = TranscriptSegment(
+        id=1,
+        post_id=1,
+        sequence_num=0,
+        start_time=925.4,
+        end_time=955.1,
+        text="Okay, that's it for this episode of the Tupac murder trial.",
+    )
+    prediction_list = AdSegmentPredictionList(
+        ad_segments=[AdSegmentPrediction(segment_offset=925.4, confidence=0.95)]
+    )
+    model_call = ModelCall(
+        post_id=1,
+        model_name=classifier.config.llm_model,
+        prompt="prompt",
+        first_segment_sequence_num=0,
+        last_segment_sequence_num=0,
+    )
+
+    created_count, matched_segments = classifier._create_identifications(
+        prediction_list=prediction_list,
+        current_chunk_db_segments=[segment],
+        model_call=model_call,
+    )
+
+    assert created_count == 0
+    assert matched_segments == []
+
     classifier = test_classifier_with_mocks
     mock_query = classifier.identification_query
     mock_query.filter_by.return_value.first.return_value = MagicMock()
