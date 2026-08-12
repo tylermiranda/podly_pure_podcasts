@@ -41,9 +41,10 @@
   "seen": {
     "2e6155cd-e5f7-4427-acfc-c8b0e0848efc": {
       "pass": true,
-      "ad_pct": 11.4,
-      "checked_at": "2026-08-12T16:50:50.554957Z",
-      "fixed": true
+      "ad_pct": 12.2,
+      "checked_at": "2026-08-12T18:21:28.660830Z",
+      "fixed": true,
+      "restored_audio": true
     },
     "1aa0997e-6915-5a56-be13-de8a4d075a00": {
       "pass": false,
