@@ -33,7 +33,10 @@ from podcast_processor.token_rate_limiter import (
 from podcast_processor.transcribe import Segment
 from podcast_processor.word_boundary_refiner import WordBoundaryRefiner
 from shared.config import Config, TestWhisperConfig
-from shared.llm_utils import model_uses_max_completion_tokens
+from shared.llm_utils import (
+    model_uses_max_completion_tokens,
+    supports_json_object_response_format,
+)
 
 
 class ClassifyParams:
@@ -656,7 +659,17 @@ class AdClassifier:
             # For older models and non-OpenAI models, use max_tokens
             completion_args["max_tokens"] = self.config.openai_max_tokens
 
-        completion_args["response_format"] = {"type": "json_object"}
+        # LM Studio and many local OpenAI-compatible servers reject
+        # response_format type=json_object (only json_schema or text).
+        base_url = getattr(self.config, "openai_base_url", None)
+        if supports_json_object_response_format(base_url):
+            completion_args["response_format"] = {"type": "json_object"}
+        else:
+            self.logger.info(
+                "Skipping response_format=json_object for base_url=%s "
+                "(local/OpenAI-compatible servers often reject it)",
+                base_url,
+            )
 
         return completion_args
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Final
+from urllib.parse import urlparse
 
 # Patterns for models that require the `max_completion_tokens` parameter
 # instead of the legacy `max_tokens`. OpenAI began enforcing this on the
@@ -16,6 +17,16 @@ _MAX_COMPLETION_TOKEN_MODELS: Final[tuple[str, ...]] = (
     "chatgpt-4o-latest",
 )
 
+# Hosts known to accept OpenAI's response_format type=json_object.
+_JSON_OBJECT_HOST_SUFFIXES: Final[tuple[str, ...]] = (
+    "openai.com",
+    "openrouter.ai",
+    "groq.com",
+    "googleapis.com",
+    "azure.com",
+    "azure-api.net",
+)
+
 
 def model_uses_max_completion_tokens(model_name: str | None) -> bool:
     """Return True when the target model expects `max_completion_tokens`."""
@@ -23,3 +34,30 @@ def model_uses_max_completion_tokens(model_name: str | None) -> bool:
         return False
     model_lower = model_name.lower()
     return any(pattern in model_lower for pattern in _MAX_COMPLETION_TOKEN_MODELS)
+
+
+def supports_json_object_response_format(base_url: str | None) -> bool:
+    """Return True when the API accepts response_format type=json_object.
+
+    Local OpenAI-compatible servers (LM Studio, Ollama, etc.) often only allow
+    ``json_schema`` or ``text`` and reject ``json_object`` with HTTP 400.
+    """
+    if not base_url:
+        # Default litellm/OpenAI route
+        return True
+    host = (urlparse(base_url).hostname or "").lower()
+    if not host:
+        return True
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return False
+    # RFC1918 / link-local — typically LAN inference servers
+    if host.startswith("192.168.") or host.startswith("10."):
+        return False
+    if host.startswith("172."):
+        try:
+            second = int(host.split(".")[1])
+        except (IndexError, ValueError):
+            second = -1
+        if 16 <= second <= 31:
+            return False
+    return any(host == s or host.endswith("." + s) for s in _JSON_OBJECT_HOST_SUFFIXES)

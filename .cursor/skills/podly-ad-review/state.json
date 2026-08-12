@@ -1,0 +1,505 @@
+{
+  "version": 1,
+  "status": "idle",
+  "podly_url": "http://192.168.1.5:5001",
+  "lmstudio_base_url": "http://192.168.1.24:1234/v1",
+  "llm_model": "openai/google/gemma-4-12b",
+  "whisper_base_url": "http://192.168.1.24:9001/v1",
+  "watched_feed_ids": [
+    1,
+    2,
+    11
+  ],
+  "watched_feed_names": {
+    "1": "History of the 90s",
+    "2": "Planet Money",
+    "11": "Everything 80s"
+  },
+  "corpus": [
+    {
+      "feed_id": 2,
+      "guid": "2e6155cd-e5f7-4427-acfc-c8b0e0848efc",
+      "title": "Currency Chaos in Argentina (Summer School)",
+      "note": "credits/wrap labeled Ad"
+    },
+    {
+      "feed_id": 1,
+      "guid": "1aa0997e-6915-5a56-be13-de8a4d075a00",
+      "title": "Jury Selection Continues at the Tupac Murder trial",
+      "note": "bleed + outro-as-ad"
+    },
+    {
+      "feed_id": 11,
+      "guid": "e767ce25-de1e-4071-b624-f00fd23b5430",
+      "title": "Fox: The Launch of the Fourth Network",
+      "note": "mixed-segment bleed"
+    }
+  ],
+  "ladder_step": 6,
+  "auto_fix": true,
+  "max_ladder_steps": 6,
+  "seen": {
+    "2e6155cd-e5f7-4427-acfc-c8b0e0848efc": {
+      "pass": true,
+      "ad_pct": 11.4,
+      "checked_at": "2026-08-12T16:50:50.554957Z",
+      "fixed": true
+    },
+    "1aa0997e-6915-5a56-be13-de8a4d075a00": {
+      "pass": false,
+      "needs_attention": true,
+      "checked_at": "2026-08-12T17:50:41.368619Z"
+    },
+    "e767ce25-de1e-4071-b624-f00fd23b5430": {
+      "pass": false,
+      "needs_attention": true,
+      "checked_at": "2026-08-12T17:50:41.368619Z"
+    },
+    "fc435c62-2480-55f6-ae86-512a7c9ca67a": {
+      "pass": false,
+      "needs_attention": true,
+      "checked_at": "2026-08-12T17:50:31.874581Z"
+    },
+    "2f80eae2-ede3-5674-8206-180104111611": {
+      "pass": false,
+      "needs_attention": true,
+      "checked_at": "2026-08-12T17:50:31.887347Z"
+    },
+    "d42fa992-11f9-5738-ba27-69378e94ba0e": {
+      "pass": true,
+      "ad_pct": 16.0,
+      "checked_at": "2026-08-12T17:48:08.488231Z"
+    },
+    "c8fefeb8-8aaa-4b93-b648-2eb72051cce3": {
+      "pass": true,
+      "ad_pct": 8.9,
+      "checked_at": "2026-08-12T17:48:08.508056Z"
+    },
+    "08584965-fc01-4cb2-bc20-65c8f85576f0": {
+      "pass": true,
+      "ad_pct": 6.8,
+      "checked_at": "2026-08-12T17:48:08.535539Z"
+    },
+    "ae181825-ac06-40ee-ac48-edee90161d67": {
+      "pass": true,
+      "ad_pct": 12.3,
+      "checked_at": "2026-08-12T17:48:08.567539Z"
+    }
+  },
+  "failures": {
+    "1aa0997e-6915-5a56-be13-de8a4d075a00": {
+      "needs_attention": true,
+      "reason": "outro content_as_ad",
+      "checked_at": "2026-08-12T17:50:41.368619Z"
+    },
+    "e767ce25-de1e-4071-b624-f00fd23b5430": {
+      "needs_attention": true,
+      "reason": "underdetect",
+      "checked_at": "2026-08-12T17:50:41.368619Z"
+    },
+    "fc435c62-2480-55f6-ae86-512a7c9ca67a": {
+      "needs_attention": true,
+      "last_score": {
+        "pass": false,
+        "ad_pct": 30.8,
+        "duration_seconds": 976.7,
+        "ad_identifications": 14,
+        "sponsor_hits": 8,
+        "content_as_ad": 0,
+        "bleeds": 0,
+        "failures": [
+          {
+            "type": "ad_pct_band",
+            "ad_pct": 30.8,
+            "band": [
+              5.0,
+              28.0
+            ],
+            "detail": "ad_pct 30.8 outside soft band [5.0,28.0]"
+          }
+        ],
+        "warnings": [
+          "ad_pct 30.8 outside soft band [5.0,28.0]"
+        ],
+        "guid": "fc435c62-2480-55f6-ae86-512a7c9ca67a",
+        "feed_title": "History of the 90s"
+      },
+      "checked_at": "2026-08-12T17:50:31.874573Z"
+    },
+    "2f80eae2-ede3-5674-8206-180104111611": {
+      "needs_attention": true,
+      "last_score": {
+        "pass": false,
+        "ad_pct": 24.0,
+        "duration_seconds": 1064.6,
+        "ad_identifications": 14,
+        "sponsor_hits": 1,
+        "content_as_ad": 2,
+        "bleeds": 0,
+        "failures": [
+          {
+            "type": "content_as_ad",
+            "start": 50.7,
+            "end": 79.8,
+            "confidence": 0.94,
+            "text": "Fuel your fire with Peloton instructors. Show up and experience our instructors breathing energy into your fitness. Need new workout buddies? Peloton Teams helps you find your crew"
+          },
+          {
+            "type": "content_as_ad",
+            "start": 917.7,
+            "end": 941.4,
+            "confidence": 0.8,
+            "text": "Okay, so that's it for this episode of the Tupac Murder Trial from History of the 90s, presented by me, Kathy Kanzora. Remember, I will have daily updates from the courthouse here "
+          }
+        ],
+        "warnings": [],
+        "guid": "2f80eae2-ede3-5674-8206-180104111611",
+        "feed_title": "History of the 90s"
+      },
+      "checked_at": "2026-08-12T17:50:31.887339Z"
+    }
+  },
+  "iteration_log": [
+    {
+      "ts": "2026-08-12T15:59:59.327555Z",
+      "guid": "2e6155cd-e5f7-4427-acfc-c8b0e0848efc",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": true,
+      "ad_pct": 0.0,
+      "failures": [],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [2.0,14.0]"
+      ]
+    },
+    {
+      "ts": "2026-08-12T15:59:59.345108Z",
+      "guid": "1aa0997e-6915-5a56-be13-de8a4d075a00",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 41.9,
+      "failures": [
+        {
+          "type": "boundary_bleed",
+          "start": 158.5,
+          "end": 174.1,
+          "confidence": 0.95,
+          "text": "ACAST helps creators launch, grow, and monetize their podcasts everywhere. ACAST.com Welcome to the Tupac Murder Trial from the history of the 90s. I'm your host, Kathy Kanzora."
+        },
+        {
+          "type": "content_as_ad",
+          "start": 925.4,
+          "end": 955.1,
+          "confidence": 0.8,
+          "text": "Okay, that's it for this episode of the Tupac murder trial from History of the 90s, presented by me, Kathy Gonzora. Remember, I will have updates in this feed throughout the entire"
+        },
+        {
+          "type": "ad_pct_with_content_fp",
+          "warnings": [
+            "ad_pct 41.9 outside soft band [5.0,28.0]"
+          ]
+        }
+      ],
+      "warnings": [
+        "ad_pct 41.9 outside soft band [5.0,28.0]"
+      ],
+      "fix_attempt": {
+        "change": {
+          "step": 2,
+          "action": "separation_10s"
+        },
+        "fixed": true,
+        "reason": null
+      },
+      "score_after_fix": {
+        "pass": true,
+        "ad_pct": 0.0,
+        "failures": []
+      }
+    },
+    {
+      "ts": "2026-08-12T16:14:59.657333Z",
+      "guid": "2e6155cd-e5f7-4427-acfc-c8b0e0848efc",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": false,
+      "ad_pct": 0.0,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 0.0,
+          "band": [
+            2.0,
+            14.0
+          ],
+          "detail": "ad_pct 0.0 outside soft band [2.0,14.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [2.0,14.0]"
+      ],
+      "fix_attempt": {
+        "change": {
+          "step": 4,
+          "action": "harden_tags",
+          "tags": [
+            "npr",
+            "history-of-the-90s",
+            "everything-80s"
+          ]
+        },
+        "fixed": true,
+        "reason": null
+      },
+      "score_after_fix": {
+        "pass": true,
+        "ad_pct": 11.4,
+        "failures": []
+      }
+    },
+    {
+      "ts": "2026-08-12T17:07:43.166208Z",
+      "guid": "1aa0997e-6915-5a56-be13-de8a4d075a00",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 0.0,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 0.0,
+          "band": [
+            5.0,
+            28.0
+          ],
+          "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [5.0,28.0]"
+      ],
+      "fix_attempt": {
+        "change": {
+          "step": 6,
+          "action": "disable_boundary_refinement"
+        },
+        "fixed": false,
+        "reason": null
+      },
+      "score_after_fix": {
+        "pass": false,
+        "ad_pct": 16.7,
+        "failures": [
+          {
+            "type": "content_as_ad",
+            "start": 925.4,
+            "end": 955.1,
+            "confidence": 0.8,
+            "text": "Okay, that's it for this episode of the Tupac murder trial from History of the 90s, presented by me, Kathy Gonzora. Remember, I will have updates in this feed throughout the entire"
+          }
+        ]
+      }
+    },
+    {
+      "ts": "2026-08-12T17:26:32.683474Z",
+      "guid": "e767ce25-de1e-4071-b624-f00fd23b5430",
+      "feed_id": 11,
+      "feed_title": "Everything 80s",
+      "pass": false,
+      "ad_pct": 0.0,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 0.0,
+          "band": [
+            2.0,
+            16.0
+          ],
+          "detail": "ad_pct 0.0 outside soft band [2.0,16.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [2.0,16.0]"
+      ],
+      "fix_attempt": {
+        "change": null,
+        "fixed": false,
+        "reason": "ladder_exhausted"
+      }
+    },
+    {
+      "ts": "2026-08-12T17:48:08.439283Z",
+      "guid": "1aa0997e-6915-5a56-be13-de8a4d075a00",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 16.7,
+      "failures": [
+        {
+          "type": "content_as_ad",
+          "start": 925.4,
+          "end": 955.1,
+          "confidence": 0.8,
+          "text": "Okay, that's it for this episode of the Tupac murder trial from History of the 90s, presented by me, Kathy Gonzora. Remember, I will have updates in this feed throughout the entire"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:48:08.450350Z",
+      "guid": "fc435c62-2480-55f6-ae86-512a7c9ca67a",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 30.8,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 30.8,
+          "band": [
+            5.0,
+            28.0
+          ],
+          "detail": "ad_pct 30.8 outside soft band [5.0,28.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 30.8 outside soft band [5.0,28.0]"
+      ]
+    },
+    {
+      "ts": "2026-08-12T17:48:08.461522Z",
+      "guid": "2f80eae2-ede3-5674-8206-180104111611",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 24.0,
+      "failures": [
+        {
+          "type": "content_as_ad",
+          "start": 50.7,
+          "end": 79.8,
+          "confidence": 0.94,
+          "text": "Fuel your fire with Peloton instructors. Show up and experience our instructors breathing energy into your fitness. Need new workout buddies? Peloton Teams helps you find your crew"
+        },
+        {
+          "type": "content_as_ad",
+          "start": 917.7,
+          "end": 941.4,
+          "confidence": 0.8,
+          "text": "Okay, so that's it for this episode of the Tupac Murder Trial from History of the 90s, presented by me, Kathy Kanzora. Remember, I will have daily updates from the courthouse here "
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:48:08.488218Z",
+      "guid": "d42fa992-11f9-5738-ba27-69378e94ba0e",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": true,
+      "ad_pct": 16.0,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:48:08.508046Z",
+      "guid": "c8fefeb8-8aaa-4b93-b648-2eb72051cce3",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": true,
+      "ad_pct": 8.9,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:48:08.535529Z",
+      "guid": "08584965-fc01-4cb2-bc20-65c8f85576f0",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": true,
+      "ad_pct": 6.8,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:48:08.567522Z",
+      "guid": "ae181825-ac06-40ee-ac48-edee90161d67",
+      "feed_id": 11,
+      "feed_title": "Everything 80s",
+      "pass": true,
+      "ad_pct": 12.3,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:50:31.860652Z",
+      "guid": "1aa0997e-6915-5a56-be13-de8a4d075a00",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 16.7,
+      "failures": [
+        {
+          "type": "content_as_ad",
+          "start": 925.4,
+          "end": 955.1,
+          "confidence": 0.8,
+          "text": "Okay, that's it for this episode of the Tupac murder trial from History of the 90s, presented by me, Kathy Gonzora. Remember, I will have updates in this feed throughout the entire"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-12T17:50:31.874172Z",
+      "guid": "fc435c62-2480-55f6-ae86-512a7c9ca67a",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 30.8,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 30.8,
+          "band": [
+            5.0,
+            28.0
+          ],
+          "detail": "ad_pct 30.8 outside soft band [5.0,28.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 30.8 outside soft band [5.0,28.0]"
+      ]
+    },
+    {
+      "ts": "2026-08-12T17:50:31.886866Z",
+      "guid": "2f80eae2-ede3-5674-8206-180104111611",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 24.0,
+      "failures": [
+        {
+          "type": "content_as_ad",
+          "start": 50.7,
+          "end": 79.8,
+          "confidence": 0.94,
+          "text": "Fuel your fire with Peloton instructors. Show up and experience our instructors breathing energy into your fitness. Need new workout buddies? Peloton Teams helps you find your crew"
+        },
+        {
+          "type": "content_as_ad",
+          "start": 917.7,
+          "end": 941.4,
+          "confidence": 0.8,
+          "text": "Okay, so that's it for this episode of the Tupac Murder Trial from History of the 90s, presented by me, Kathy Kanzora. Remember, I will have daily updates from the courthouse here "
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "local_num_segments_per_prompt": 24,
+  "last_run_at": "2026-08-12T17:50:31.887812Z",
+  "notes": "Bootstrap 2026-08-12: LM Studio requires skipping response_format=json_object (hot-patched Tower). Segments=24 for 8k context. PM pass@11.9%. H90 plateau: outro content_as_ad. E80 underdetect/slow \u2014 needs code or larger model."
+}
