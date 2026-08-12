@@ -162,6 +162,28 @@ def _normalize_segments_payload(
     return normalized
 
 
+def _words_column_value(raw: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(raw, list) or not raw:
+        return None
+    payload: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        word = item.get("word", item.get("text"))
+        start = item.get("start")
+        end = item.get("end")
+        if word is None or start is None or end is None:
+            continue
+        payload.append(
+            {
+                "word": str(word),
+                "start": round(float(start), 3),
+                "end": round(float(end), 3),
+            }
+        )
+    return payload or None
+
+
 def replace_transcription_action(params: dict[str, Any]) -> dict[str, Any]:
     post_id = params.get("post_id")
     segments = params.get("segments")
@@ -200,6 +222,7 @@ def replace_transcription_action(params: dict[str, Any]) -> dict[str, Any]:
                 "start_time": float(seg["start_time"]),
                 "end_time": float(seg["end_time"]),
                 "text": str(seg["text"]),
+                "words": _words_column_value(seg.get("words")),
             }
         )
 

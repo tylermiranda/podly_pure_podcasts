@@ -18,6 +18,7 @@ from .transcribe import (
     OpenAIWhisperTranscriber,
     TestWhisperTranscriber,
     Transcriber,
+    words_to_payload,
 )
 
 DEFAULT_LANGUAGE = "en"
@@ -210,6 +211,7 @@ class TranscriptionManager:
                     "start_time": round(seg.start, 1),
                     "end_time": round(seg.end, 1),
                     "text": seg.text,
+                    "words": words_to_payload(seg.words),
                 }
                 for i, seg in enumerate(pydantic_segments or [])
             ]

@@ -191,3 +191,34 @@ def test_replace_transcription_preserves_llm_when_no_sibling_to_supersede(app):
         assert db.session.get(ModelCall, llm_id) is not None
         db.session.refresh(llm_call)
         assert llm_call.status == "success"
+
+
+def test_replace_transcription_persists_word_timestamps(app):
+    with app.app_context():
+        post = _make_post(app, guid="words-1")
+        replace_transcription_action(
+            {
+                "post_id": post.id,
+                "segments": [
+                    {
+                        "sequence_num": 0,
+                        "start_time": 0.0,
+                        "end_time": 1.0,
+                        "text": "hi there",
+                        "words": [
+                            {"word": "hi", "start": 0.0, "end": 0.4},
+                            {"word": " there", "start": 0.4123, "end": 1.0},
+                        ],
+                    }
+                ],
+            }
+        )
+        db.session.commit()
+
+        from app.models import TranscriptSegment
+
+        segment = TranscriptSegment.query.filter_by(post_id=post.id).one()
+        assert segment.words == [
+            {"word": "hi", "start": 0.0, "end": 0.4},
+            {"word": " there", "start": 0.412, "end": 1.0},
+        ]

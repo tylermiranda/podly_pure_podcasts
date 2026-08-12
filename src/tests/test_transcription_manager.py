@@ -7,7 +7,7 @@ from flask import Flask
 
 from app.extensions import db
 from app.models import Feed, ModelCall, Post, TranscriptSegment
-from podcast_processor.transcribe import Segment, Transcriber
+from podcast_processor.transcribe import Segment, Transcriber, WordTimestamp
 from podcast_processor.transcription_manager import TranscriptionManager
 from shared.config import Config, TestWhisperConfig
 from shared.test_utils import create_standard_test_config
@@ -197,6 +197,52 @@ def test_transcribe_new(
         assert TranscriptSegment.query.filter_by(post_id=post.id).count() == 2
         assert ModelCall.query.filter_by(post_id=post.id).count() == 1
         assert ModelCall.query.filter_by(post_id=post.id).first().status == "success"
+
+
+def test_transcribe_persists_word_timestamps(
+    test_config: Config,
+    test_logger: logging.Logger,
+    app: Flask,
+) -> None:
+    with app.app_context():
+        feed = Feed(title="Test Feed", rss_url="http://example.com/rss.xml")
+        post = Post(
+            feed=feed,
+            guid="guid-words",
+            download_url="http://example.com/audio-words.mp3",
+            title="Test Post",
+            unprocessed_audio_path="/path/to/audio.mp3",
+        )
+        db.session.add_all([feed, post])
+        db.session.commit()
+
+        transcriber = MockTranscriber(
+            [
+                Segment(
+                    start=0.0,
+                    end=5.0,
+                    text="Hello world",
+                    words=[
+                        WordTimestamp(word="Hello", start=0.0, end=0.5),
+                        WordTimestamp(word=" world", start=0.5123, end=1.0),
+                    ],
+                )
+            ]
+        )
+        manager = TranscriptionManager(
+            test_logger,
+            test_config,
+            db_session=db.session,
+            transcriber=transcriber,
+        )
+
+        segments = manager.transcribe(post)
+
+        assert len(segments) == 1
+        assert segments[0].words == [
+            {"word": "Hello", "start": 0.0, "end": 0.5},
+            {"word": " world", "start": 0.512, "end": 1.0},
+        ]
 
 
 def test_transcribe_handles_error(

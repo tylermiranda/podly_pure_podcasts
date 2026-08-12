@@ -176,6 +176,7 @@ class TranscriptSegment(db.Model):  # type: ignore[name-defined, misc]
     start_time = db.Column(db.Float, nullable=False)
     end_time = db.Column(db.Float, nullable=False)
     text = db.Column(db.Text, nullable=False)
+    words = db.Column(db.JSON, nullable=True)
 
     identifications = db.relationship(
         "Identification", backref="transcript_segment", lazy="dynamic"

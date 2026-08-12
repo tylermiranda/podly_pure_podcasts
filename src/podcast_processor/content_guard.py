@@ -9,7 +9,9 @@ segments before audio is cut.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 from re import Pattern
+from typing import Any
 
 # Show content that is frequently mislabeled as an ad.
 CONTENT_RESUME_PATTERNS: tuple[Pattern[str], ...] = (
@@ -84,32 +86,110 @@ def is_mixed_ad_content(text: str) -> bool:
     return has_sponsor_cue(stripped) and has_content_resume(stripped)
 
 
-def estimate_content_resume_time(start: float, end: float, text: str) -> float | None:
-    """Estimate when show content resumes inside a mixed Whisper segment."""
+def _normalize_words(words: Sequence[Any] | None) -> list[dict[str, Any]]:
+    if not words:
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in words:
+        if isinstance(item, Mapping):
+            token = item.get("word", item.get("text"))
+            start = item.get("start")
+        else:
+            token = getattr(item, "word", None) or getattr(item, "text", None)
+            start = getattr(item, "start", None)
+        if token is None or start is None:
+            continue
+        normalized.append({"word": str(token), "start": float(start)})
+    return normalized
+
+
+def _word_start_for_char_offset(
+    words: list[dict[str, Any]], char_offset: int, *, spaced: bool = False
+) -> float | None:
+    cursor = 0
+    for index, item in enumerate(words):
+        token = item["word"].strip() if spaced else item["word"]
+        if spaced:
+            if index > 0:
+                cursor += 1
+            next_cursor = cursor + len(token)
+        else:
+            next_cursor = cursor + len(token)
+        if char_offset < next_cursor:
+            return item["start"]
+        cursor = next_cursor
+    return None
+
+
+def _resume_time_from_words(text: str, words: list[dict[str, Any]]) -> float | None:
+    reconstructed = "".join(item["word"] for item in words)
+    match = _first_match(reconstructed, CONTENT_RESUME_PATTERNS)
+    if match is not None:
+        return _word_start_for_char_offset(words, match.start())
+
+    spaced = " ".join(item["word"].strip() for item in words if item["word"].strip())
+    match = _first_match(spaced, CONTENT_RESUME_PATTERNS)
+    if match is None:
+        match = _first_match(text, CONTENT_RESUME_PATTERNS)
+        if match is None:
+            return None
+        if reconstructed.strip() == (text or "").strip():
+            leading = len(reconstructed) - len(reconstructed.lstrip())
+            return _word_start_for_char_offset(words, match.start() + leading)
+        return None
+    return _word_start_for_char_offset(words, match.start(), spaced=True)
+
+
+def estimate_content_resume_time(
+    start: float,
+    end: float,
+    text: str,
+    words: Sequence[Any] | None = None,
+) -> tuple[float | None, bool]:
+    """Estimate when show content resumes inside a mixed Whisper segment.
+
+    Returns (timestamp, used_word_times). Word times win when they can be
+    aligned to the content-resume phrase; otherwise a character-ratio guess
+    is used.
+    """
     stripped = text or ""
     if not stripped or end <= start:
-        return None
+        return None, False
+    parsed_words = _normalize_words(words)
+    if parsed_words:
+        word_time = _resume_time_from_words(stripped, parsed_words)
+        if word_time is not None:
+            return max(start, min(end, word_time)), True
     match = _first_match(stripped, CONTENT_RESUME_PATTERNS)
     if match is None:
-        return None
+        return None, False
     ratio = match.start() / max(len(stripped), 1)
-    return start + (end - start) * ratio
+    return start + (end - start) * ratio, False
 
 
-def ad_cut_window(start: float, end: float, text: str) -> tuple[float, float] | None:
+def ad_cut_window(
+    start: float,
+    end: float,
+    text: str,
+    words: Sequence[Any] | None = None,
+) -> tuple[float, float] | None:
     """Return the time window that should be cut, or None to keep the audio.
 
     Content-only labels are dropped. Mixed CTA+cold-open segments are trimmed
-    to the sponsor portion (with a 0.4s pad before the content phrase).
+    to the sponsor portion (0.2s pad before a word-aligned content phrase,
+    0.4s pad for the character-ratio fallback).
     """
     stripped = text or ""
     if is_content_only(stripped):
         return None
     if is_mixed_ad_content(stripped):
-        resume_at = estimate_content_resume_time(start, end, stripped)
+        resume_at, used_words = estimate_content_resume_time(
+            start, end, stripped, words
+        )
         if resume_at is None:
             return (start, end)
-        cut_end = max(start, min(end, resume_at - 0.4))
+        pad = 0.2 if used_words else 0.4
+        cut_end = max(start, min(end, resume_at - pad))
         if cut_end - start < 1.0:
             # Sponsor tail is too short to cut without eating the cold-open.
             return None

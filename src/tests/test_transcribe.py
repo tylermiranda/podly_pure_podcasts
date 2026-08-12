@@ -1,6 +1,6 @@
 import logging
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from openai.types.audio.transcription_segment import TranscriptionSegment
@@ -80,12 +80,34 @@ def test_groq_transcribe(mocker: Any) -> None:
 
 
 def test_offset() -> None:
-    # import here instead of the toplevel because torch is not installed properly in CI.
     from podcast_processor.transcribe import (
         OpenAIWhisperTranscriber,
+        Segment,
+        WordTimestamp,
     )
 
-    assert OpenAIWhisperTranscriber.add_offset_to_segments(
+    offset = OpenAIWhisperTranscriber.add_offset_to_segments(
+        [
+            Segment(
+                start=12.345,
+                end=45.678,
+                text="hi",
+                words=[WordTimestamp(word="hi", start=12.345, end=12.5)],
+            )
+        ],
+        123,
+    )
+    assert offset[0].start == pytest.approx(12.468)
+    assert offset[0].end == pytest.approx(45.801)
+    assert offset[0].words is not None
+    assert offset[0].words[0].start == pytest.approx(12.468)
+    assert offset[0].words[0].end == pytest.approx(12.623)
+
+
+def test_convert_segments_without_words() -> None:
+    from podcast_processor.transcribe import OpenAIWhisperTranscriber
+
+    converted = OpenAIWhisperTranscriber.convert_segments(
         [
             TranscriptionSegment(
                 id=1,
@@ -99,19 +121,113 @@ def test_offset() -> None:
                 start=12.345,
                 end=45.678,
             )
-        ],
-        123,
-    ) == [
+        ]
+    )
+    assert len(converted) == 1
+    assert converted[0].text == "hi"
+    assert converted[0].start == 12.345
+    assert converted[0].words is None
+
+
+def test_bucket_words_into_segments() -> None:
+    from podcast_processor.transcribe import (
+        Segment,
+        WordTimestamp,
+        bucket_words_into_segments,
+    )
+
+    segments = [
+        Segment(start=0.0, end=10.0, text="hello there"),
+        Segment(start=10.0, end=20.0, text="welcome back"),
+    ]
+    words = [
+        WordTimestamp(word="hello", start=0.1, end=0.4),
+        WordTimestamp(word=" there", start=0.4, end=0.8),
+        WordTimestamp(word="welcome", start=10.0, end=10.4),
+        WordTimestamp(word=" back", start=20.0, end=20.2),
+    ]
+    filled = bucket_words_into_segments(segments, words)
+    assert [w.word for w in filled[0].words or []] == ["hello", " there"]
+    assert [w.word for w in filled[1].words or []] == ["welcome", " back"]
+
+
+def test_nested_segment_words_not_overwritten_by_top_level() -> None:
+    from podcast_processor.transcribe import (
+        WordTimestamp,
+        segments_from_whisper_response,
+    )
+
+    class RawSeg:
+        start = 0.0
+        end = 1.0
+        text = "hi"
+        words = [{"word": "hi", "start": 0.0, "end": 1.0}]
+
+    filled = segments_from_whisper_response(
+        [RawSeg()],
+        [WordTimestamp(word="other", start=0.5, end=0.6)],
+    )
+    assert filled[0].words is not None
+    assert filled[0].words[0].word == "hi"
+
+
+def test_extract_transcription_words_from_model_dump() -> None:
+    from podcast_processor.transcribe import extract_transcription_words
+
+    class DumpOnly:
+        words = None
+
+        def model_dump(self) -> dict[str, Any]:
+            return {"words": [{"word": "hi", "start": 0.1, "end": 0.2}]}
+
+    parsed = extract_transcription_words(DumpOnly())
+    assert len(parsed) == 1
+    assert parsed[0].word == "hi"
+    assert parsed[0].start == 0.1
+
+
+def test_get_segments_retries_without_word_granularity(tmp_path: Any) -> None:
+    from podcast_processor.transcribe import OpenAIWhisperTranscriber
+    from shared.config import RemoteWhisperConfig
+
+    chunk = tmp_path / "chunk.wav"
+    chunk.write_bytes(b"fake-audio")
+
+    transcriber = OpenAIWhisperTranscriber(
+        logging.getLogger("test"), RemoteWhisperConfig(api_key="test")
+    )
+    transcription = MagicMock()
+    transcription.segments = [
         TranscriptionSegment(
             id=1,
-            avg_logprob=2,
-            seek=6,
-            temperature=7,
+            avg_logprob=0,
+            seek=0,
+            temperature=0,
             text="hi",
             tokens=[],
-            compression_ratio=3,
-            no_speech_prob=4,
-            start=12.468,
-            end=45.800999999999995,
+            compression_ratio=0,
+            no_speech_prob=0,
+            start=0.0,
+            end=1.0,
         )
     ]
+    transcription.words = None
+    transcription.model_extra = None
+    transcription.model_dump.return_value = {}
+
+    calls: list[list[str]] = []
+
+    def fake_create(**kwargs: Any) -> Any:
+        granularities = kwargs["timestamp_granularities"]
+        calls.append(list(granularities))
+        if granularities == ["word", "segment"]:
+            raise ValueError("unsupported timestamp_granularities: word")
+        return transcription
+
+    with patch.object(
+        transcriber.openai_client.audio.transcriptions, "create", fake_create
+    ):
+        result = transcriber.get_segments_for_chunk(str(chunk), "en")
+    assert calls == [["word", "segment"], ["segment"]]
+    assert result[0].text == "hi"
+    assert result[0].words is None

@@ -90,7 +90,12 @@ class AudioProcessor:
                 continue
             orig_start = float(segment.start_time or 0.0)
             orig_end = float(segment.end_time or 0.0)
-            window = ad_cut_window(orig_start, orig_end, segment.text or "")
+            window = ad_cut_window(
+                orig_start,
+                orig_end,
+                segment.text or "",
+                words=getattr(segment, "words", None),
+            )
             if window is None:
                 self.logger.info(
                     "Dropping content-only ad label for post %s segment %s",
