@@ -15,7 +15,7 @@ from app.extensions import db
 from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
 from podcast_processor.boundary_refiner import BoundaryRefiner
-from podcast_processor.content_guard import is_content_only
+from podcast_processor.content_guard import has_sponsor_cue, is_content_only
 from podcast_processor.cue_detector import CueDetector
 from podcast_processor.llm_concurrency_limiter import (
     ConcurrencyContext,
@@ -184,6 +184,8 @@ class AdClassifier:
                         "Breaking to avoid infinite loop."
                     )
                     break
+
+            self._apply_sponsor_cue_labels(transcript_segments, post)
 
             # Expand neighbors using bulk operations
             # NOTE: Use self.db_session.query() instead of self.identification_query
@@ -992,6 +994,77 @@ class AdClassifier:
             .first()
             is not None
         )
+
+    def _latest_llm_model_call(self, post_id: int) -> ModelCall | None:
+        return (
+            self.db_session.query(ModelCall)
+            .filter(
+                ModelCall.post_id == post_id,
+                ModelCall.status == "success",
+                ModelCall.language.is_(None),
+            )
+            .order_by(ModelCall.id.desc())
+            .first()
+        )
+
+    def _apply_sponsor_cue_labels(
+        self, transcript_segments: list[TranscriptSegment], post: Post
+    ) -> int:
+        """Label unlabeled segments that already contain strong sponsor cues.
+
+        LLMs sometimes return a successful but empty/wrong-shape payload
+        (e.g. a single ``segment_offset`` object). Network promos like ACAST
+        still have to be cut.
+        """
+        if not transcript_segments:
+            return 0
+
+        model_call = self._latest_llm_model_call(post.id)
+        if model_call is None:
+            self.logger.warning(
+                "No successful LLM ModelCall for post %s; skipping sponsor-cue labels",
+                post.id,
+            )
+            return 0
+
+        existing_ids = {
+            row[0]
+            for row in self.db_session.query(Identification.transcript_segment_id)
+            .join(TranscriptSegment)
+            .filter(
+                TranscriptSegment.post_id == post.id,
+                Identification.label == "ad",
+            )
+            .all()
+        }
+
+        to_insert: list[dict[str, Any]] = []
+        for segment in transcript_segments:
+            if segment.id in existing_ids:
+                continue
+            text = segment.text or ""
+            if is_content_only(text) or not has_sponsor_cue(text):
+                continue
+            to_insert.append(
+                {
+                    "transcript_segment_id": segment.id,
+                    "model_call_id": model_call.id,
+                    "label": "ad",
+                    "confidence": max(0.9, float(self.config.output.min_confidence)),
+                }
+            )
+            existing_ids.add(segment.id)
+
+        if not to_insert:
+            return 0
+
+        created = self._create_identifications_bulk(to_insert)
+        self.logger.info(
+            "Sponsor-cue fallback labeled %s segments for post %s",
+            created,
+            post.id,
+        )
+        return created
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """Determine if an error should be retried."""

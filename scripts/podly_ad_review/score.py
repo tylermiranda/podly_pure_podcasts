@@ -31,7 +31,8 @@ SPONSOR_PATTERNS = [
     r"\bjerry\.ai\b",
     r"\bbombas\b",
     r"\bmint mobile\b",
-    r"\bacast\.com\b",
+    r"\bacast(?:\.com)?\b",
+    r"\bhere'?s a show we recommend\b",
     r"\bwise\.com\b",
     r"\bpromo code\b",
 ]
@@ -158,6 +159,28 @@ def score_stats(
                 "detail": msg,
             }
         )
+
+    ad_label_count = sum(1 for i in ids if (i.get("label") or "ad") == "ad")
+    if duration > 60 and ad_label_count == 0:
+        missed = [
+            s
+            for s in segs
+            if _match_any((s.get("text") or "").strip(), SPONSOR_PATTERNS)
+        ]
+        if missed:
+            failures.append(
+                {
+                    "type": "missed_sponsor_cues",
+                    "count": len(missed),
+                    "examples": [
+                        {
+                            "start": s.get("start_time"),
+                            "text": ((s.get("text") or "").strip())[:120],
+                        }
+                        for s in missed[:3]
+                    ],
+                }
+            )
 
     if ids and sponsor_hits == 0 and ad_pct >= 3.0:
         failures.append(

@@ -90,7 +90,7 @@
     "1c76fd7a-f846-5ef4-a145-b973ca889244": {
       "pass": false,
       "needs_attention": true,
-      "checked_at": "2026-08-13T14:31:51.969831Z"
+      "checked_at": "2026-08-13T14:42:31.384096Z"
     }
   },
   "failures": {
@@ -243,30 +243,32 @@
       "needs_attention": true,
       "last_score": {
         "pass": false,
-        "ad_pct": 0.0,
-        "duration_seconds": 691.7,
-        "ad_identifications": 0,
-        "sponsor_hits": 0,
+        "ad_pct": 14.5,
+        "duration_seconds": 710.0,
+        "ad_identifications": 5,
+        "sponsor_hits": 5,
         "content_as_ad": 0,
-        "bleeds": 0,
+        "bleeds": 2,
         "failures": [
           {
-            "type": "ad_pct_band",
-            "ad_pct": 0.0,
-            "band": [
-              5.0,
-              28.0
-            ],
-            "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+            "type": "boundary_bleed",
+            "start": 25.2,
+            "end": 41.3,
+            "confidence": 0.9,
+            "text": "ACAST helps creators launch, grow, and monetize their podcasts everywhere. ACAST.com Welcome to the Tupac Murder Trial from History of the 90s. I'm your host, Kathy Kanzora."
+          },
+          {
+            "type": "boundary_bleed",
+            "start": 652.4,
+            "end": 682.2,
+            "confidence": 0.95,
+            "text": "Welcome to ACAST Classics 2026. Four exceptional limited series handpicked for their journalism, craft and storytelling. Including Sweet Bobby. I'd caught him red-handed. West Cork"
           }
         ],
-        "warnings": [
-          "ad_pct 0.0 outside soft band [5.0,28.0]"
-        ],
-        "guid": "1c76fd7a-f846-5ef4-a145-b973ca889244",
-        "feed_title": "History of the 90s"
+        "warnings": [],
+        "guid": "1c76fd7a-f846-5ef4-a145-b973ca889244"
       },
-      "checked_at": "2026-08-13T14:31:51.969824Z"
+      "checked_at": "2026-08-13T14:42:31.384085Z"
     }
   },
   "iteration_log": [
@@ -730,9 +732,35 @@
       ],
       "title": "Jury Selection at the Tupac Murder Trial in Final Phase: Suge Knight says keep me out of it",
       "note": "manual review of newly processed H90 episode"
+    },
+    {
+      "ts": "2026-08-13T14:42:31.383471Z",
+      "guid": "1c76fd7a-f846-5ef4-a145-b973ca889244",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 14.5,
+      "failures": [
+        {
+          "type": "boundary_bleed",
+          "start": 25.2,
+          "end": 41.3,
+          "confidence": 0.9,
+          "text": "ACAST helps creators launch, grow, and monetize their podcasts everywhere. ACAST.com Welcome to the Tupac Murder Trial from History of the 90s. I'm your host, Kathy Kanzora."
+        },
+        {
+          "type": "boundary_bleed",
+          "start": 652.4,
+          "end": 682.2,
+          "confidence": 0.95,
+          "text": "Welcome to ACAST Classics 2026. Four exceptional limited series handpicked for their journalism, craft and storytelling. Including Sweet Bobby. I'd caught him red-handed. West Cork"
+        }
+      ],
+      "warnings": [],
+      "note": "after sponsor-cue fallback + parse coerce hot-patch"
     }
   ],
   "local_num_segments_per_prompt": 24,
-  "last_run_at": "2026-08-13T14:31:51.969839Z",
+  "last_run_at": "2026-08-13T14:42:31.384103Z",
   "notes": "DeepSeek Flash reprocess 2026-08-12 (refiners off, segments=60, content_guard hot-patched). PM 14.7% band-fail + unlabeled interview FPs ~1180-1299s. H90 0% \u2014 ModelCall 953 failed_permanent empty response. E80 12.1% mixed bleeds still in labels (Grow disclaimer + cold-open; Jerry.ai + cold-open)."
 }

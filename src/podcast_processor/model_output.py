@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -93,6 +93,32 @@ def _attempt_json_repair(json_str: str) -> str:
     return repaired
 
 
+def _coerce_ad_segment_payload(data: Any) -> Any:
+    """Accept common LLM shape mistakes for the ad-segment schema.
+
+    Flash-class models sometimes emit a single prediction object
+    ``{"segment_offset": 0.0, "confidence": 0.95}`` (or a bare list of those)
+    instead of ``{"ad_segments": [...]}``.
+    """
+    if isinstance(data, list):
+        return {"ad_segments": data}
+    if isinstance(data, dict):
+        if "ad_segments" in data:
+            return data
+        if "segment_offset" in data and "confidence" in data:
+            return {"ad_segments": [data]}
+    return data
+
+
+def _validate_predictions(text: str) -> AdSegmentPredictionList:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # Preserve pydantic ValidationError for garbage JSON (callers/tests).
+        return AdSegmentPredictionList.model_validate_json(text)
+    return AdSegmentPredictionList.model_validate(_coerce_ad_segment_payload(data))
+
+
 def _merge_duplicate_ad_segments(text: str) -> str:
     """Merge duplicate ``"ad_segments"`` keys that some local LLMs produce.
 
@@ -126,10 +152,15 @@ def _merge_duplicate_ad_segments(text: str) -> str:
 
 
 def clean_and_parse_model_output(model_output: str) -> AdSegmentPredictionList:
-    start_marker, end_marker = "{", "}"
+    first_brace = model_output.find("{")
+    first_bracket = model_output.find("[")
+    if first_bracket != -1 and (first_brace == -1 or first_bracket < first_brace):
+        start_marker, end_marker = "[", "]"
+    else:
+        start_marker, end_marker = "{", "}"
 
-    assert model_output.count(start_marker) >= 1, (
-        f"No opening brace found in: {model_output[:200]}"
+    assert start_marker in model_output, (
+        f"No opening {start_marker} found in: {model_output[:200]}"
     )
 
     start_idx = model_output.index(start_marker)
@@ -149,21 +180,17 @@ def clean_and_parse_model_output(model_output: str) -> AdSegmentPredictionList:
 
     model_output = _merge_duplicate_ad_segments(model_output)
 
-    # First attempt: try to parse as-is
     try:
-        return AdSegmentPredictionList.model_validate_json(model_output)
+        return _validate_predictions(model_output)
     except Exception as first_error:  # noqa: BLE001
         logger.debug(f"Initial parse failed: {first_error}")
-
-        # Second attempt: try to repair truncated JSON
         try:
             repaired_output = _attempt_json_repair(model_output)
-            result = AdSegmentPredictionList.model_validate_json(repaired_output)
+            result = _validate_predictions(repaired_output)
             logger.info("Successfully parsed model output after JSON repair")
             return result
         except Exception as repair_error:
             logger.error(
                 f"JSON repair also failed. Original output (first 500 chars): {model_output[:500]}"
             )
-            # Re-raise the original error with more context
             raise first_error from repair_error

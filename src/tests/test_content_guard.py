@@ -5,6 +5,7 @@ import pytest
 from podcast_processor.ad_merger import AdGroup, AdMerger
 from podcast_processor.content_guard import (
     ad_cut_window,
+    has_sponsor_cue,
     is_content_only,
     is_mixed_ad_content,
 )
@@ -47,6 +48,27 @@ def test_pure_sponsor_unchanged() -> None:
     text = "This message comes from WISE, the smart way to manage your money around the world."
     assert ad_cut_window(10.0, 25.0, text) == (10.0, 25.0)
     assert not is_content_only(text)
+
+
+def test_acast_network_promo_is_sponsor() -> None:
+    text = (
+        "ACAST powers the world's best podcasts. Here's a show we recommend. "
+        "Hey, what's up, you guys? It's Drew Afualo."
+    )
+    assert has_sponsor_cue(text)
+    assert not is_content_only(text)
+    assert ad_cut_window(0.0, 25.0, text) == (0.0, 25.0)
+
+
+def test_welcome_to_acast_classics_is_full_ad_cut() -> None:
+    text = (
+        "Welcome to ACAST Classics 2026. Four exceptional limited series "
+        "handpicked for their journalism, craft and storytelling."
+    )
+    assert has_sponsor_cue(text)
+    assert not is_content_only(text)
+    assert not is_mixed_ad_content(text)
+    assert ad_cut_window(652.4, 682.2, text) == (652.4, 682.2)
 
 
 def test_mixed_uses_word_start_instead_of_char_ratio() -> None:

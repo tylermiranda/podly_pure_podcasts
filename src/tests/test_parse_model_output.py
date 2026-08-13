@@ -81,6 +81,27 @@ def test_clean_parse_output_truncated_multiple_segments() -> None:
     )
 
 
+def test_parse_bare_segment_offset_object() -> None:
+    """DeepSeek Flash sometimes emits one prediction instead of ad_segments."""
+    result = clean_and_parse_model_output('{"segment_offset": 0.0, "confidence": 0.95}')
+    assert result == AdSegmentPredictionList(
+        ad_segments=[AdSegmentPrediction(segment_offset=0.0, confidence=0.95)]
+    )
+
+
+def test_parse_bare_list_of_predictions() -> None:
+    result = clean_and_parse_model_output(
+        '[{"segment_offset": 0.0, "confidence": 0.95},'
+        '{"segment_offset": 25.2, "confidence": 0.9}]'
+    )
+    assert result == AdSegmentPredictionList(
+        ad_segments=[
+            AdSegmentPrediction(segment_offset=0.0, confidence=0.95),
+            AdSegmentPrediction(segment_offset=25.2, confidence=0.9),
+        ]
+    )
+
+
 def test_clean_parse_output_truncated_with_content_type() -> None:
     """Test parsing truncated JSON that includes content_type but is missing final }."""
     model_output = '{"ad_segments":[{"segment_offset":12.0,"confidence":0.86}],"content_type":"promotional_external","confidence":0.92'

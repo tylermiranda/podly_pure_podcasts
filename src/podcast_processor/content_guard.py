@@ -15,7 +15,7 @@ from typing import Any
 
 # Show content that is frequently mislabeled as an ad.
 CONTENT_RESUME_PATTERNS: tuple[Pattern[str], ...] = (
-    re.compile(r"\bwelcome to\b", re.I),
+    re.compile(r"\bwelcome to(?!\s+acast\b)", re.I),
     re.compile(r"\bwelcome back\b", re.I),
     re.compile(r"\bback from the break\b", re.I),
     re.compile(r"\ball right,? class\b", re.I),
@@ -44,7 +44,8 @@ SPONSOR_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bjerry\.ai\b", re.I),
     re.compile(r"\bbombas\b", re.I),
     re.compile(r"\bmint mobile\b", re.I),
-    re.compile(r"\bacast\.com\b", re.I),
+    re.compile(r"\bacast(?:\.com)?\b", re.I),
+    re.compile(r"\bhere'?s a show we recommend\b", re.I),
     re.compile(r"\bwise\.com\b", re.I),
     re.compile(r"\bvisit\s+\S+\.(?:com|net|org|io)\b", re.I),
     re.compile(r"\bgo to\s+\S+\.(?:com|net|org|io)\b", re.I),

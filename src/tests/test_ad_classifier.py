@@ -9,7 +9,7 @@ from litellm.exceptions import InternalServerError
 from litellm.types.utils import Choices
 
 from app.extensions import db
-from app.models import ModelCall, Post, TranscriptSegment
+from app.models import Feed, Identification, ModelCall, Post, TranscriptSegment
 from podcast_processor.ad_classifier import AdClassifier
 from podcast_processor.model_output import (
     AdSegmentPrediction,
@@ -448,3 +448,55 @@ def test_build_chunk_payload_trims_for_token_limit(
     assert len(chunk_segments) >= consumed
     assert mock_validator.call_count == 2
     assert user_prompt
+
+
+def test_apply_sponsor_cue_labels_marks_unlabeled_acast(
+    test_config: Config, app: Flask
+) -> None:
+    with app.app_context():
+        feed = Feed(title="History of the 90s", rss_url="http://example.com/h90.rss")
+        post = Post(
+            feed=feed,
+            guid="suge-1",
+            download_url="http://example.com/suge.mp3",
+            title="Suge Knight",
+            unprocessed_audio_path="/tmp/suge.mp3",
+        )
+        db.session.add_all([feed, post])
+        db.session.commit()
+
+        model_call = ModelCall(
+            post_id=post.id,
+            model_name="openai/~deepseek/deepseek-v4-flash-latest",
+            first_segment_sequence_num=0,
+            last_segment_sequence_num=1,
+            prompt="classify",
+            response='{"segment_offset": 0.0, "confidence": 0.95}',
+            status="success",
+            language=None,
+        )
+        promo = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=0.0,
+            end_time=25.0,
+            text="ACAST powers the world's best podcasts. Here's a show we recommend.",
+        )
+        content = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=1,
+            start_time=43.5,
+            end_time=68.4,
+            text="Coming up today, the final phase of jury selection.",
+        )
+        db.session.add_all([model_call, promo, content])
+        db.session.commit()
+
+        classifier = AdClassifier(config=test_config, db_session=db.session)
+        created = classifier._apply_sponsor_cue_labels([promo, content], post)
+
+        assert created == 1
+        labeled = Identification.query.filter_by(label="ad").all()
+        assert len(labeled) == 1
+        assert labeled[0].transcript_segment_id == promo.id
+        assert labeled[0].confidence >= 0.9
