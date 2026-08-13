@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "status": "idle",
+  "status": "has_failures",
   "podly_url": "http://192.168.1.5:5001",
   "lmstudio_base_url": "http://192.168.1.24:1234/v1",
   "llm_model": "openai/~deepseek/deepseek-v4-flash-latest",
@@ -86,6 +86,11 @@
       "pass": true,
       "ad_pct": 12.3,
       "checked_at": "2026-08-12T17:48:08.567539Z"
+    },
+    "1c76fd7a-f846-5ef4-a145-b973ca889244": {
+      "pass": false,
+      "needs_attention": true,
+      "checked_at": "2026-08-13T14:31:51.969831Z"
     }
   },
   "failures": {
@@ -233,6 +238,35 @@
         "checked_at": "2026-08-12T21:23:15.347432Z"
       },
       "checked_at": "2026-08-12T21:23:15.347432Z"
+    },
+    "1c76fd7a-f846-5ef4-a145-b973ca889244": {
+      "needs_attention": true,
+      "last_score": {
+        "pass": false,
+        "ad_pct": 0.0,
+        "duration_seconds": 691.7,
+        "ad_identifications": 0,
+        "sponsor_hits": 0,
+        "content_as_ad": 0,
+        "bleeds": 0,
+        "failures": [
+          {
+            "type": "ad_pct_band",
+            "ad_pct": 0.0,
+            "band": [
+              5.0,
+              28.0
+            ],
+            "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+          }
+        ],
+        "warnings": [
+          "ad_pct 0.0 outside soft band [5.0,28.0]"
+        ],
+        "guid": "1c76fd7a-f846-5ef4-a145-b973ca889244",
+        "feed_title": "History of the 90s"
+      },
+      "checked_at": "2026-08-13T14:31:51.969824Z"
     }
   },
   "iteration_log": [
@@ -645,9 +679,60 @@
       ],
       "warnings": [],
       "note": "deepseek-flash content_guard reprocess, refiners off"
+    },
+    {
+      "ts": "2026-08-13T13:48:19.215794Z",
+      "guid": "1c76fd7a-f846-5ef4-a145-b973ca889244",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 0.0,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 0.0,
+          "band": [
+            5.0,
+            28.0
+          ],
+          "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [5.0,28.0]"
+      ],
+      "fix_attempt": {
+        "change": null,
+        "fixed": false,
+        "reason": "ladder_exhausted"
+      }
+    },
+    {
+      "ts": "2026-08-13T14:31:51.969423Z",
+      "guid": "1c76fd7a-f846-5ef4-a145-b973ca889244",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 0.0,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 0.0,
+          "band": [
+            5.0,
+            28.0
+          ],
+          "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [5.0,28.0]"
+      ],
+      "title": "Jury Selection at the Tupac Murder Trial in Final Phase: Suge Knight says keep me out of it",
+      "note": "manual review of newly processed H90 episode"
     }
   ],
   "local_num_segments_per_prompt": 24,
-  "last_run_at": "2026-08-12T21:23:15.347432Z",
+  "last_run_at": "2026-08-13T14:31:51.969839Z",
   "notes": "DeepSeek Flash reprocess 2026-08-12 (refiners off, segments=60, content_guard hot-patched). PM 14.7% band-fail + unlabeled interview FPs ~1180-1299s. H90 0% \u2014 ModelCall 953 failed_permanent empty response. E80 12.1% mixed bleeds still in labels (Grow disclaimer + cold-open; Jerry.ai + cold-open)."
 }
