@@ -181,6 +181,29 @@ def test_refine_start_uses_segment_seq_without_phrase() -> None:
     assert refined_start == 100.0
 
 
+def test_time_from_stored_words_uses_payload_not_word_rate() -> None:
+    refiner = WordBoundaryRefiner(config=create_standard_test_config())
+    seg = {
+        "sequence_num": 1,
+        "start_time": 10.0,
+        "end_time": 20.0,
+        "text": "Visit wise.com today",
+        "words": [
+            {"word": "Visit", "start": 10.0, "end": 10.4},
+            {"word": "wise.com", "start": 12.5, "end": 13.1},
+            {"word": "today", "start": 13.2, "end": 13.6},
+        ],
+    }
+    start = refiner._time_from_stored_words(
+        seg, match_start_idx=1, match_end_idx=1, direction="start"
+    )
+    end = refiner._time_from_stored_words(
+        seg, match_start_idx=1, match_end_idx=1, direction="end"
+    )
+    assert start == 12.5
+    assert end == 13.1
+
+
 def test_refine_end_uses_segment_seq_without_phrase() -> None:
     refiner = WordBoundaryRefiner(config=create_standard_test_config())
     all_segments = [

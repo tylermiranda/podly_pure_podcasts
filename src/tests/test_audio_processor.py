@@ -164,6 +164,44 @@ def test_get_ad_segments_trims_mixed_chunk_using_word_times(app: Flask) -> None:
         assert segment.end_time == 174.1
 
 
+def test_get_ad_segments_honors_identification_span(app: Flask) -> None:
+    post = Post(id=1, title="Test Post")
+    segment = TranscriptSegment(
+        id=1,
+        post_id=1,
+        sequence_num=0,
+        start_time=0.0,
+        end_time=40.0,
+        text="This message comes from WISE. Send money abroad.",
+    )
+    identification = Identification(
+        transcript_segment_id=1,
+        model_call_id=1,
+        label="ad",
+        confidence=0.95,
+        start_time=0.0,
+        end_time=18.0,
+    )
+
+    with app.app_context():
+        mock_identification_query = MagicMock()
+        mock_query_chain = MagicMock()
+        mock_identification_query.join.return_value = mock_query_chain
+        mock_query_chain.join.return_value = mock_query_chain
+        mock_query_chain.filter.return_value = mock_query_chain
+        mock_query_chain.all.return_value = [identification]
+
+        processor = AudioProcessor(
+            config=create_standard_test_config(),
+            identification_query=mock_identification_query,
+        )
+
+        with patch.object(identification, "transcript_segment", segment):
+            segments = processor.get_ad_segments(post)
+
+        assert segments == [(0.0, 18.0)]
+
+
 def test_merge_ad_segments(
     test_processor_with_mocks: AudioProcessor,
 ) -> None:
@@ -186,6 +224,21 @@ def test_merge_ad_segments(
     assert len(merged) == 2
     assert merged[0] == (0, 10000)  # 0-10s
     assert merged[1] == (20000, 25000)  # 20-25s
+
+
+def test_merge_ad_segments_caps_glue_gap_below_config_separation(
+    test_processor_with_mocks: AudioProcessor,
+) -> None:
+    """A 60s config gap must not glue distinct midrolls 12s apart."""
+    merged = test_processor_with_mocks.merge_ad_segments(
+        duration_ms=200000,
+        ad_segments=[(0.0, 30.0), (42.0, 70.0)],
+        min_ad_segment_length_seconds=2.0,
+        min_ad_segment_separation_seconds=60.0,
+    )
+    assert len(merged) == 2
+    assert merged[0] == (0, 30000)
+    assert merged[1] == (42000, 70000)
 
 
 def test_merge_ad_segments_with_short_segments(

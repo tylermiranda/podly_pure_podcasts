@@ -302,6 +302,9 @@ class Identification(db.Model):  # type: ignore[name-defined, misc]
     )
     confidence = db.Column(db.Float, nullable=True)
     label = db.Column(db.String, nullable=False)
+    # Optional cut window inside the Whisper line. NULL = use the full segment.
+    start_time = db.Column(db.Float, nullable=True)
+    end_time = db.Column(db.Float, nullable=True)
 
     __table_args__ = (
         db.Index(

@@ -25,6 +25,20 @@ class CueDetector:
             r"\b(my|our)\s+(book|course|newsletter|fund|patreon|substack|community|platform)\b",
             re.I,
         )
+        # Generic sponsor language — not rotating CPG brand names.
+        self.sponsor_language_pattern: Pattern[str] = re.compile(
+            r"(?:"
+            r"\bthis message comes from\b|"
+            r"\bsupport comes from\b|"
+            r"\bthis ad is sponsored\b|"
+            r"\bbrought to you by\b|"
+            r"\bpromo code\b|"
+            r"\bhere'?s a show we recommend\b|"
+            r"\bavailability and coverage vary\b|"
+            r"\bacast(?:\.com)?\b"
+            r")",
+            re.I,
+        )
 
     def has_cue(self, text: str) -> bool:
         return bool(
@@ -32,6 +46,18 @@ class CueDetector:
             or self.promo_pattern.search(text)
             or self.phone_pattern.search(text)
             or self.cta_pattern.search(text)
+        )
+
+    def has_strong_ad_cue(self, text: str) -> bool:
+        """URL, promo code, phone, or sponsor-language — not generic 'go to' CTAs."""
+        stripped = text or ""
+        if not stripped:
+            return False
+        return bool(
+            self.url_pattern.search(stripped)
+            or self.promo_pattern.search(stripped)
+            or self.phone_pattern.search(stripped)
+            or self.sponsor_language_pattern.search(stripped)
         )
 
     def analyze(self, text: str) -> dict[str, bool]:
@@ -42,6 +68,7 @@ class CueDetector:
             "cta": bool(self.cta_pattern.search(text)),
             "transition": bool(self.transition_pattern.search(text)),
             "self_promo": bool(self.self_promo_pattern.search(text)),
+            "sponsor_language": bool(self.sponsor_language_pattern.search(text)),
         }
 
     def highlight_cues(self, text: str) -> str:

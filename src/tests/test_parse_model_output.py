@@ -81,6 +81,23 @@ def test_clean_parse_output_truncated_multiple_segments() -> None:
     )
 
 
+def test_parse_start_end_span_object() -> None:
+    result = clean_and_parse_model_output(
+        '{"start": 158.5, "end": 162.4, "confidence": 0.94}'
+    )
+    assert result == AdSegmentPredictionList(
+        ad_segments=[AdSegmentPrediction(start=158.5, end=162.4, confidence=0.94)]
+    )
+
+
+def test_parse_start_end_without_confidence_defaults() -> None:
+    result = clean_and_parse_model_output('{"start": 10.0, "end": 25.0}')
+    assert len(result.ad_segments) == 1
+    assert result.ad_segments[0].start == 10.0
+    assert result.ad_segments[0].end == 25.0
+    assert result.ad_segments[0].confidence == 0.9
+
+
 def test_parse_bare_segment_offset_object() -> None:
     """DeepSeek Flash sometimes emits one prediction instead of ad_segments."""
     result = clean_and_parse_model_output('{"segment_offset": 0.0, "confidence": 0.95}')

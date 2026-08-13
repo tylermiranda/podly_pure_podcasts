@@ -500,3 +500,124 @@ def test_apply_sponsor_cue_labels_marks_unlabeled_acast(
         assert len(labeled) == 1
         assert labeled[0].transcript_segment_id == promo.id
         assert labeled[0].confidence >= 0.9
+        assert labeled[0].start_time == 0.0
+        assert labeled[0].end_time == 25.0
+
+
+def test_apply_sponsor_cue_labels_generic_url_not_brand_list(
+    test_config: Config, app: Flask
+) -> None:
+    with app.app_context():
+        feed = Feed(title="History Daily", rss_url="http://example.com/hd.rss")
+        post = Post(
+            feed=feed,
+            guid="manila-1",
+            download_url="http://example.com/manila.mp3",
+            title="Manila",
+            unprocessed_audio_path="/tmp/manila.mp3",
+        )
+        db.session.add_all([feed, post])
+        db.session.commit()
+
+        model_call = ModelCall(
+            post_id=post.id,
+            model_name="openai/~deepseek/deepseek-v4-flash-latest",
+            first_segment_sequence_num=0,
+            last_segment_sequence_num=1,
+            prompt="classify",
+            response='{"ad_segments":[]}',
+            status="success",
+            language=None,
+        )
+        promo = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=179.8,
+            end_time=205.6,
+            text="Go to HistoryDailyLive.com. That's HistoryDailyLive.com.",
+        )
+        story = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=1,
+            start_time=206.0,
+            end_time=227.6,
+            text="Cuba lies only 90 miles from Florida.",
+        )
+        db.session.add_all([model_call, promo, story])
+        db.session.commit()
+
+        classifier = AdClassifier(config=test_config, db_session=db.session)
+        created = classifier._apply_sponsor_cue_labels([promo, story], post)
+
+        assert created == 1
+        labeled = Identification.query.filter_by(label="ad").all()
+        assert labeled[0].transcript_segment_id == promo.id
+
+
+def test_should_not_expand_neighbor_on_gap_alone(
+    test_classifier_with_mocks: AdClassifier,
+) -> None:
+    assert (
+        test_classifier_with_mocks._should_expand_neighbor(
+            has_strong_cue=False,
+            is_transition=False,
+            gap_seconds=3.0,
+        )
+        is False
+    )
+    assert (
+        test_classifier_with_mocks._should_expand_neighbor(
+            has_strong_cue=False,
+            is_transition=True,
+            gap_seconds=3.0,
+        )
+        is True
+    )
+
+
+def test_create_identifications_matches_interior_offset(
+    test_classifier_with_mocks: AdClassifier,
+) -> None:
+    classifier = test_classifier_with_mocks
+    classifier._segment_has_ad_identification = MagicMock(return_value=False)  # type: ignore[method-assign]
+    segment = TranscriptSegment(
+        id=7,
+        post_id=1,
+        sequence_num=0,
+        start_time=158.5,
+        end_time=174.1,
+        text=(
+            "ACAST.com Welcome to the Tupac Murder Trial from the history of the 90s. "
+            "I'm your host, Kathy Kanzora."
+        ),
+        words=[
+            {"word": "ACAST.com", "start": 158.5, "end": 159.4},
+            {"word": " Welcome", "start": 162.4, "end": 162.9},
+            {"word": " to", "start": 162.9, "end": 163.1},
+        ],
+    )
+    prediction_list = AdSegmentPredictionList(
+        ad_segments=[AdSegmentPrediction(segment_offset=170.2, confidence=0.95)]
+    )
+    model_call = ModelCall(
+        id=3,
+        post_id=1,
+        model_name=classifier.config.llm_model,
+        prompt="prompt",
+        first_segment_sequence_num=0,
+        last_segment_sequence_num=0,
+    )
+
+    with patch("podcast_processor.ad_classifier.writer_client") as writer:
+        writer.action.return_value = MagicMock(success=True, data={"inserted": 1})
+        created_count, matched = classifier._create_identifications(
+            prediction_list=prediction_list,
+            current_chunk_db_segments=[segment],
+            model_call=model_call,
+        )
+
+    assert created_count == 1
+    assert matched == [segment]
+    payload = writer.action.call_args.args[1]["identifications"][0]
+    assert payload["start_time"] == 158.5
+    assert payload["end_time"] == pytest.approx(162.2)

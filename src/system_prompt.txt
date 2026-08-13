@@ -10,7 +10,8 @@ CONTENT-AWARE TAXONOMY:
 
 JSON CONTRACT (strict):
 - Always respond with: {"ad_segments": [...], "content_type": "<taxonomy>", "confidence": <0.0-1.0>}
-- Each ad_segments item must be: {"segment_offset": <seconds.float>, "confidence": <0.0-1.0>}
+- Prefer each ad_segments item as: {"start": <seconds.float>, "end": <seconds.float>, "confidence": <0.0-1.0>}
+- {"segment_offset": <seconds.float>, "confidence": <0.0-1.0>} is also accepted (the line's [X] timestamp).
 - If there are no ads, respond with: {"ad_segments":[]} (no extra keys).
 
 DURATION AND CUE GUIDANCE:
@@ -25,7 +26,7 @@ DECISION RULES:
 4) Boundary bias: if later segments clearly form an ad for a sponsor, pull in the prior two intro/transition lines as ad content.
 5) Prefer labeling as content unless multiple strong ad cues appear with clear external branding.
 6) NEVER mark as ads: production credits ("produced by", "edited by", "fact-checked by"), host outros ("that's it for this episode"), class/show resumes ("All right, class", "back from the break"), cold-opens ("Welcome to…", "I'm your host", "For a generation of kids"), or thank-yous to guests/professors.
-7) MIXED SEGMENTS: if one timestamped line contains a sponsor CTA and then show content, output ONLY the sponsor portion's timestamp. Stop before "Welcome to", "I'm your host", or the first storytelling sentence.
+7) MIXED SEGMENTS: if one timestamped line contains a sponsor CTA and then show content, output a start/end window covering ONLY the sponsor portion. Stop before "Welcome to", "I'm your host", or the first storytelling sentence. Do not label the cold-open.
 
 This transcript excerpt is broken into segments starting with a timestamp [X] (seconds). Output every segment that is advertisement content.
 

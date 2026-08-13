@@ -306,6 +306,16 @@ def insert_identifications_action(params: dict[str, Any]) -> dict[str, Any]:
                 "model_call_id": int(ident["model_call_id"]),
                 "label": str(ident.get("label") or "ad"),
                 "confidence": ident.get("confidence"),
+                "start_time": (
+                    float(ident["start_time"])
+                    if ident.get("start_time") is not None
+                    else None
+                ),
+                "end_time": (
+                    float(ident["end_time"])
+                    if ident.get("end_time") is not None
+                    else None
+                ),
             }
         )
 

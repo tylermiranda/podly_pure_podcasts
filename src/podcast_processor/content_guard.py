@@ -13,6 +13,10 @@ from collections.abc import Mapping, Sequence
 from re import Pattern
 from typing import Any
 
+from podcast_processor.cue_detector import CueDetector
+
+_CUE_DETECTOR = CueDetector()
+
 # Show content that is frequently mislabeled as an ad.
 CONTENT_RESUME_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bwelcome to(?!\s+acast\b)", re.I),
@@ -32,24 +36,18 @@ CONTENT_RESUME_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\btoday on (?:the show|summer school|planet money)\b", re.I),
 )
 
+# Kept for tests/callers that inspect the regex list. Detection uses CueDetector.
 SPONSOR_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bthis message comes from\b", re.I),
     re.compile(r"\bsupport comes from\b", re.I),
     re.compile(r"\bthis ad is sponsored\b", re.I),
     re.compile(r"\bbrought to you by\b", re.I),
     re.compile(r"\bpromo code\b", re.I),
-    re.compile(r"\bzocdoc\b", re.I),
-    re.compile(r"\bgrowtherapy\b", re.I),
-    re.compile(r"\bgrow therapy\b", re.I),
-    re.compile(r"\bjerry\.ai\b", re.I),
-    re.compile(r"\bbombas\b", re.I),
-    re.compile(r"\bmint mobile\b", re.I),
-    re.compile(r"\bacast(?:\.com)?\b", re.I),
     re.compile(r"\bhere'?s a show we recommend\b", re.I),
-    re.compile(r"\bwise\.com\b", re.I),
+    re.compile(r"\bavailability and coverage vary\b", re.I),
+    re.compile(r"\bacast(?:\.com)?\b", re.I),
     re.compile(r"\bvisit\s+\S+\.(?:com|net|org|io)\b", re.I),
     re.compile(r"\bgo to\s+\S+\.(?:com|net|org|io)\b", re.I),
-    re.compile(r"\bavailability and coverage vary\b", re.I),
 )
 
 
@@ -69,7 +67,7 @@ def has_content_resume(text: str) -> bool:
 
 
 def has_sponsor_cue(text: str) -> bool:
-    return _first_match(text, SPONSOR_PATTERNS) is not None
+    return _CUE_DETECTOR.has_strong_ad_cue(text)
 
 
 def is_content_only(text: str) -> bool:
@@ -95,13 +93,23 @@ def _normalize_words(words: Sequence[Any] | None) -> list[dict[str, Any]]:
         if isinstance(item, Mapping):
             token = item.get("word", item.get("text"))
             start = item.get("start")
+            end = item.get("end")
         else:
             token = getattr(item, "word", None) or getattr(item, "text", None)
             start = getattr(item, "start", None)
+            end = getattr(item, "end", None)
         if token is None or start is None:
             continue
-        normalized.append({"word": str(token), "start": float(start)})
+        payload: dict[str, Any] = {"word": str(token), "start": float(start)}
+        if end is not None:
+            payload["end"] = float(end)
+        normalized.append(payload)
     return normalized
+
+
+def normalize_word_timestamps(words: Sequence[Any] | None) -> list[dict[str, Any]]:
+    """Public alias for Whisper word payloads used by boundary refiners."""
+    return _normalize_words(words)
 
 
 def _word_start_for_char_offset(

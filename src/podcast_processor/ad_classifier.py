@@ -14,8 +14,14 @@ from sqlalchemy import and_
 from app.extensions import db
 from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
+from podcast_processor.ad_spans import (
+    apply_content_guard_to_span,
+    find_containing_segment,
+    identification_span,
+    resolve_prediction_spans,
+)
 from podcast_processor.boundary_refiner import BoundaryRefiner
-from podcast_processor.content_guard import has_sponsor_cue, is_content_only
+from podcast_processor.content_guard import is_content_only
 from podcast_processor.cue_detector import CueDetector
 from podcast_processor.llm_concurrency_limiter import (
     ConcurrencyContext,
@@ -322,22 +328,53 @@ class AdClassifier:
             self.logger.error("ModelCall object is unexpectedly None. Skipping chunk.")
             return []
 
-        if self._should_call_llm(model_call):
+        called_llm = self._should_call_llm(model_call)
+        if called_llm:
             self._perform_llm_call(
                 model_call=model_call,
                 system_prompt=system_prompt,
             )
 
+        matched: list[TranscriptSegment] = []
         if model_call.status == "success" and model_call.response:
-            return self._process_successful_response(
+            matched = self._process_successful_response(
                 model_call=model_call,
                 current_chunk_db_segments=chunk_segments,
             )
-        if model_call.status != "success":
+        if matched:
+            return matched
+
+        if not self._chunk_has_strong_cues(chunk_segments):
+            if model_call.status != "success":
+                self.logger.info(
+                    f"LLM call for ModelCall {model_call.id} was not successful "
+                    f"(status: {model_call.status}). No identifications to process."
+                )
+            return []
+
+        if called_llm and model_call.status == "success":
             self.logger.info(
-                f"LLM call for ModelCall {model_call.id} was not successful (status: {model_call.status}). No identifications to process."
+                "Empty classify response with sponsor cues; retrying ModelCall %s",
+                model_call.id,
             )
-        return []
+            self._perform_llm_call(
+                model_call=model_call,
+                system_prompt=system_prompt,
+            )
+            if model_call.status == "success" and model_call.response:
+                matched = self._process_successful_response(
+                    model_call=model_call,
+                    current_chunk_db_segments=chunk_segments,
+                )
+                if matched:
+                    return matched
+
+        self.logger.info(
+            "Applying cue-gated labels for ModelCall %s (status=%s)",
+            model_call.id,
+            model_call.status,
+        )
+        return self._label_chunk_cues(chunk_segments, model_call)
 
     def _build_chunk_payload(
         self,
@@ -833,58 +870,71 @@ class AdClassifier:
                 )
                 continue
 
-            matched_segment = self._find_matching_segment(
-                segment_offset=pred.segment_offset,
-                current_chunk_db_segments=current_chunk_db_segments,
-            )
+            for span in resolve_prediction_spans(pred, current_chunk_db_segments):
+                matched_segment = span.segment
+                if is_content_only(matched_segment.text or ""):
+                    self.logger.info(
+                        "Skipping content-only ad prediction at %.2fs for post %s: %s",
+                        span.start,
+                        model_call.post_id,
+                        (matched_segment.text or "")[:120],
+                    )
+                    continue
 
-            if not matched_segment:
-                self.logger.warning(
-                    f"Could not find matching TranscriptSegment for ad prediction offset {pred.segment_offset:.2f} in post {model_call.post_id}, chunk {model_call.first_segment_sequence_num}-{model_call.last_segment_sequence_num}. Confidence: {pred.confidence:.2f}"
+                window = apply_content_guard_to_span(
+                    matched_segment, span.start, span.end
                 )
-                continue
+                if window is None:
+                    continue
 
-            if is_content_only(matched_segment.text or ""):
-                self.logger.info(
-                    "Skipping content-only ad prediction at %.2fs for post %s: %s",
-                    pred.segment_offset,
-                    model_call.post_id,
-                    (matched_segment.text or "")[:120],
+                if matched_segment.id not in processed_segment_ids:
+                    processed_segment_ids.add(matched_segment.id)
+                    matched_segments.append(matched_segment)
+
+                if self._segment_has_ad_identification(matched_segment.id):
+                    self.logger.debug(
+                        "Segment %s for post %s already has an ad identification; skipping new record.",
+                        matched_segment.id,
+                        model_call.post_id,
+                    )
+                    continue
+
+                existing = next(
+                    (
+                        row
+                        for row in to_insert
+                        if row["transcript_segment_id"] == matched_segment.id
+                    ),
+                    None,
                 )
-                continue
+                if existing is not None:
+                    existing["start_time"] = min(existing["start_time"], window[0])
+                    existing["end_time"] = max(existing["end_time"], window[1])
+                    existing["confidence"] = max(
+                        float(existing.get("confidence") or 0.0),
+                        adjusted_confidence,
+                    )
+                    continue
 
-            if matched_segment.id in processed_segment_ids:
-                continue
-
-            processed_segment_ids.add(matched_segment.id)
-            matched_segments.append(matched_segment)
-
-            if self._segment_has_ad_identification(matched_segment.id):
-                self.logger.debug(
-                    "Segment %s for post %s already has an ad identification; skipping new record.",
-                    matched_segment.id,
-                    model_call.post_id,
+                to_insert.append(
+                    self._identification_row(
+                        segment=matched_segment,
+                        model_call=model_call,
+                        confidence=adjusted_confidence,
+                        start=window[0],
+                        end=window[1],
+                    )
                 )
-                continue
 
-            to_insert.append(
-                {
-                    "transcript_segment_id": matched_segment.id,
-                    "model_call_id": model_call.id,
-                    "label": "ad",
-                    "confidence": adjusted_confidence,
-                }
-            )
-
-            self._maybe_add_preroll_context(
-                matched_segment=matched_segment,
-                current_chunk_db_segments=current_chunk_db_segments,
-                model_call=model_call,
-                processed_segment_ids=processed_segment_ids,
-                matched_segments=matched_segments,
-                base_confidence=adjusted_confidence,
-                to_insert=to_insert,
-            )
+                self._maybe_add_preroll_context(
+                    matched_segment=matched_segment,
+                    current_chunk_db_segments=current_chunk_db_segments,
+                    model_call=model_call,
+                    processed_segment_ids=processed_segment_ids,
+                    matched_segments=matched_segments,
+                    base_confidence=adjusted_confidence,
+                    to_insert=to_insert,
+                )
 
         if not to_insert:
             return 0, matched_segments
@@ -915,6 +965,74 @@ class AdClassifier:
             return max(0.0, base_confidence - 0.1)
         return base_confidence
 
+    @staticmethod
+    def _identification_row(
+        *,
+        segment: TranscriptSegment,
+        model_call: ModelCall,
+        confidence: float,
+        start: float | None = None,
+        end: float | None = None,
+    ) -> dict[str, Any]:
+        row: dict[str, Any] = {
+            "transcript_segment_id": segment.id,
+            "model_call_id": model_call.id,
+            "label": "ad",
+            "confidence": confidence,
+        }
+        if start is not None:
+            row["start_time"] = start
+        if end is not None:
+            row["end_time"] = end
+        return row
+
+    def _chunk_has_strong_cues(self, segments: list[TranscriptSegment]) -> bool:
+        return any(
+            self.cue_detector.has_strong_ad_cue(seg.text or "")
+            and not is_content_only(seg.text or "")
+            for seg in segments
+        )
+
+    def _label_chunk_cues(
+        self,
+        chunk_segments: list[TranscriptSegment],
+        model_call: ModelCall,
+    ) -> list[TranscriptSegment]:
+        """Label unlabeled strong-cue segments in this chunk after empty/failed LLM."""
+        to_insert: list[dict[str, Any]] = []
+        matched: list[TranscriptSegment] = []
+        for segment in chunk_segments:
+            text = segment.text or ""
+            if is_content_only(text) or not self.cue_detector.has_strong_ad_cue(text):
+                continue
+            if self._segment_has_ad_identification(segment.id):
+                continue
+            window = apply_content_guard_to_span(
+                segment,
+                float(segment.start_time or 0.0),
+                float(segment.end_time or 0.0),
+            )
+            if window is None:
+                continue
+            to_insert.append(
+                self._identification_row(
+                    segment=segment,
+                    model_call=model_call,
+                    confidence=max(0.9, float(self.config.output.min_confidence)),
+                    start=window[0],
+                    end=window[1],
+                )
+            )
+            matched.append(segment)
+        if to_insert:
+            self._create_identifications_bulk(to_insert)
+            self.logger.info(
+                "Cue-gated fallback labeled %s segments for ModelCall %s",
+                len(to_insert),
+                model_call.id,
+            )
+        return matched
+
     def _maybe_add_preroll_context(
         self,
         *,
@@ -944,14 +1062,13 @@ class AdClassifier:
             processed_segment_ids.add(seg.id)
             matched_segments.append(seg)
             to_insert.append(
-                {
-                    "transcript_segment_id": seg.id,
-                    "model_call_id": model_call.id,
-                    "label": "ad",
-                    "confidence": max(
-                        base_confidence, self.config.output.min_confidence
-                    ),
-                }
+                self._identification_row(
+                    segment=seg,
+                    model_call=model_call,
+                    confidence=max(base_confidence, self.config.output.min_confidence),
+                    start=float(seg.start_time or 0.0),
+                    end=float(seg.end_time or 0.0),
+                )
             )
             created += 1
 
@@ -970,15 +1087,8 @@ class AdClassifier:
         segment_offset: float,
         current_chunk_db_segments: list[TranscriptSegment],
     ) -> TranscriptSegment | None:
-        """Find the TranscriptSegment that matches the given segment offset."""
-        min_diff = float("inf")
-        matched_segment = None
-        for ts_segment in current_chunk_db_segments:
-            diff = abs(ts_segment.start_time - segment_offset)
-            if diff < min_diff and diff < 0.5:  # Tolerance of 0.5 seconds
-                matched_segment = ts_segment
-                min_diff = diff
-        return matched_segment
+        """Find the TranscriptSegment that contains (or starts near) the offset."""
+        return find_containing_segment(current_chunk_db_segments, segment_offset)
 
     def _segment_has_ad_identification(self, transcript_segment_id: int) -> bool:
         """Check if a transcript segment already has an ad identification.
@@ -996,25 +1106,25 @@ class AdClassifier:
         )
 
     def _latest_llm_model_call(self, post_id: int) -> ModelCall | None:
-        return (
-            self.db_session.query(ModelCall)
-            .filter(
-                ModelCall.post_id == post_id,
-                ModelCall.status == "success",
-                ModelCall.language.is_(None),
-            )
+        base = self.db_session.query(ModelCall).filter(
+            ModelCall.post_id == post_id,
+            ModelCall.language.is_(None),
+        )
+        success = (
+            base.filter(ModelCall.status == "success")
             .order_by(ModelCall.id.desc())
             .first()
         )
+        if success is not None:
+            return success
+        return base.order_by(ModelCall.id.desc()).first()
 
     def _apply_sponsor_cue_labels(
         self, transcript_segments: list[TranscriptSegment], post: Post
     ) -> int:
         """Label unlabeled segments that already contain strong sponsor cues.
 
-        LLMs sometimes return a successful but empty/wrong-shape payload
-        (e.g. a single ``segment_offset`` object). Network promos like ACAST
-        still have to be cut.
+        Empty or failed LLM chunks still need generic URL/promo/phone cuts.
         """
         if not transcript_segments:
             return 0
@@ -1022,7 +1132,7 @@ class AdClassifier:
         model_call = self._latest_llm_model_call(post.id)
         if model_call is None:
             self.logger.warning(
-                "No successful LLM ModelCall for post %s; skipping sponsor-cue labels",
+                "No LLM ModelCall for post %s; skipping sponsor-cue labels",
                 post.id,
             )
             return 0
@@ -1043,15 +1153,23 @@ class AdClassifier:
             if segment.id in existing_ids:
                 continue
             text = segment.text or ""
-            if is_content_only(text) or not has_sponsor_cue(text):
+            if is_content_only(text) or not self.cue_detector.has_strong_ad_cue(text):
+                continue
+            window = apply_content_guard_to_span(
+                segment,
+                float(segment.start_time or 0.0),
+                float(segment.end_time or 0.0),
+            )
+            if window is None:
                 continue
             to_insert.append(
-                {
-                    "transcript_segment_id": segment.id,
-                    "model_call_id": model_call.id,
-                    "label": "ad",
-                    "confidence": max(0.9, float(self.config.output.min_confidence)),
-                }
+                self._identification_row(
+                    segment=segment,
+                    model_call=model_call,
+                    confidence=max(0.9, float(self.config.output.min_confidence)),
+                    start=window[0],
+                    end=window[1],
+                )
             )
             existing_ids.add(segment.id)
 
@@ -1384,12 +1502,7 @@ class AdClassifier:
                 if is_content_only(text):
                     continue
                 signals = self.cue_detector.analyze(text)
-                has_strong_cue = (
-                    signals["url"]
-                    or signals["promo"]
-                    or signals["phone"]
-                    or signals["cta"]
-                )
+                has_strong_cue = self.cue_detector.has_strong_ad_cue(text)
                 is_transition = signals["transition"]
                 is_self_promo = signals["self_promo"]
 
@@ -1413,12 +1526,13 @@ class AdClassifier:
                 )
 
                 to_create.append(
-                    {
-                        "transcript_segment_id": seg.id,
-                        "model_call_id": model_call.id,
-                        "label": "ad",
-                        "confidence": confidence,
-                    }
+                    self._identification_row(
+                        segment=seg,
+                        model_call=model_call,
+                        confidence=confidence,
+                        start=float(seg.start_time or 0.0),
+                        end=float(seg.end_time or 0.0),
+                    )
                 )
                 existing.add(key)  # Avoid duplicates in this batch
 
@@ -1435,13 +1549,8 @@ class AdClassifier:
         is_transition: bool,
         gap_seconds: float,
     ) -> bool:
-        if not self.config.enable_boundary_refinement:
-            return has_strong_cue
-
-        if has_strong_cue or is_transition:
-            return True
-
-        return gap_seconds <= 10.0
+        del gap_seconds
+        return has_strong_cue or is_transition
 
     @staticmethod
     def _neighbor_confidence(
@@ -1505,6 +1614,7 @@ class AdClassifier:
                         "start_time": s.start_time,
                         "text": s.text,
                         "end_time": s.end_time,
+                        "words": getattr(s, "words", None),
                     }
                     for s in transcript_segments
                 ],
@@ -1571,18 +1681,18 @@ class AdClassifier:
             return []
 
         identifications = sorted(
-            identifications, key=lambda i: i.transcript_segment.start_time
+            identifications, key=lambda i: identification_span(i)[0]
         )
         blocks: list[dict[str, Any]] = []
         current: list[Identification] = []
 
         for ident in identifications:
-            if (
-                not current
-                or ident.transcript_segment.start_time
-                - current[-1].transcript_segment.end_time
-                <= 10.0
-            ):
+            start, _end = identification_span(ident)
+            if not current:
+                current.append(ident)
+                continue
+            _, prev_end = identification_span(current[-1])
+            if start - prev_end <= 10.0:
                 current.append(ident)
             else:
                 blocks.append(self._create_block(current))
@@ -1594,9 +1704,10 @@ class AdClassifier:
         return blocks
 
     def _create_block(self, identifications: list[Identification]) -> dict[str, Any]:
+        spans = [identification_span(i) for i in identifications]
         return {
-            "start": min(i.transcript_segment.start_time for i in identifications),
-            "end": max(i.transcript_segment.end_time for i in identifications),
+            "start": min(s for s, _ in spans),
+            "end": max(e for _, e in spans),
             "confidence": sum(i.confidence for i in identifications)
             / len(identifications),
             "identifications": identifications,

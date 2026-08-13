@@ -5,8 +5,11 @@ from app.extensions import db
 from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
 from podcast_processor.ad_merger import AdMerger
+from podcast_processor.ad_spans import (
+    AD_MERGE_PROXIMITY_SECONDS,
+    identification_cut_window,
+)
 from podcast_processor.audio import clip_segments_with_fade, get_audio_duration_ms
-from podcast_processor.content_guard import ad_cut_window
 from shared.config import Config
 
 
@@ -90,12 +93,7 @@ class AudioProcessor:
                 continue
             orig_start = float(segment.start_time or 0.0)
             orig_end = float(segment.end_time or 0.0)
-            window = ad_cut_window(
-                orig_start,
-                orig_end,
-                segment.text or "",
-                words=getattr(segment, "words", None),
-            )
+            window = identification_cut_window(ident, segment)
             if window is None:
                 self.logger.info(
                     "Dropping content-only ad label for post %s segment %s",
@@ -111,6 +109,7 @@ class AudioProcessor:
                     start_time=window[0],
                     end_time=window[1],
                     text=segment.text,
+                    words=getattr(segment, "words", None),
                 )
             else:
                 cut_segment = segment
@@ -127,7 +126,7 @@ class AudioProcessor:
         ad_groups = self.ad_merger.merge(
             ad_segments=ad_segments_with_text,
             identifications=valid_identifications,
-            max_gap=float(self.config.output.min_ad_segment_separation_seconds),
+            max_gap=AD_MERGE_PROXIMITY_SECONDS,
             min_content_gap=12.0,
         )
 
@@ -267,9 +266,8 @@ class AudioProcessor:
             min_separation=min_ad_segment_separation_seconds,
         )
 
-        ad_segments = self._merge_close_segments(
-            ad_segments, min_separation=min_ad_segment_separation_seconds
-        )
+        glue_gap = min(min_ad_segment_separation_seconds, AD_MERGE_PROXIMITY_SECONDS)
+        ad_segments = self._merge_close_segments(ad_segments, min_separation=glue_gap)
         ad_segments = self._filter_short_segments(
             ad_segments, min_length=min_ad_segment_length_seconds
         )

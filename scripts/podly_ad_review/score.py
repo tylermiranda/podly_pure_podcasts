@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 import re
+import sys
+from pathlib import Path
 from typing import Any
+
+_SRC = Path(__file__).resolve().parents[2] / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from podcast_processor.cue_detector import CueDetector  # noqa: E402
+
+_CUE_DETECTOR = CueDetector()
 
 CONTENT_PATTERNS = [
     r"\bwelcome to\b",
@@ -21,21 +31,10 @@ CONTENT_PATTERNS = [
     r"\bfact-?checked by\b",
 ]
 
-SPONSOR_PATTERNS = [
-    r"\bthis message comes from\b",
-    r"\bsupport comes from\b",
-    r"\bthis ad is sponsored\b",
-    r"\bbrought to you by\b",
-    r"\bzocdoc\b",
-    r"\bgrowtherapy\b",
-    r"\bjerry\.ai\b",
-    r"\bbombas\b",
-    r"\bmint mobile\b",
-    r"\bacast(?:\.com)?\b",
-    r"\bhere'?s a show we recommend\b",
-    r"\bwise\.com\b",
-    r"\bpromo code\b",
-]
+
+def _has_sponsor(text: str) -> bool:
+    return _CUE_DETECTOR.has_strong_ad_cue(text)
+
 
 REFINER_BAD_PHRASES = [
     "i want to thank",
@@ -81,7 +80,7 @@ def _score_ad_labels(
             text = (by_id[a["transcript_segment_id"]].get("text") or "").strip()
         start = a.get("segment_start_time")
         end = a.get("segment_end_time")
-        has_sponsor = _match_any(text, SPONSOR_PATTERNS)
+        has_sponsor = _has_sponsor(text)
         has_content = _match_any(text, CONTENT_PATTERNS)
         if has_sponsor:
             sponsor_hits += 1
@@ -162,11 +161,7 @@ def score_stats(
 
     ad_label_count = sum(1 for i in ids if (i.get("label") or "ad") == "ad")
     if duration > 60 and ad_label_count == 0:
-        missed = [
-            s
-            for s in segs
-            if _match_any((s.get("text") or "").strip(), SPONSOR_PATTERNS)
-        ]
+        missed = [s for s in segs if _has_sponsor((s.get("text") or "").strip())]
         if missed:
             failures.append(
                 {

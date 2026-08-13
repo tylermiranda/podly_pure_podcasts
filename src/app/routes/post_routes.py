@@ -494,6 +494,16 @@ def api_post_stats(p_guid: str) -> flask.Response:
                             round(ident.confidence, 2) if ident.confidence else None
                         ),
                         "model_call_id": ident.model_call_id,
+                        "start_time": (
+                            round(ident.start_time, 1)
+                            if getattr(ident, "start_time", None) is not None
+                            else None
+                        ),
+                        "end_time": (
+                            round(ident.end_time, 1)
+                            if getattr(ident, "end_time", None) is not None
+                            else None
+                        ),
                     }
                     for ident in segment_identifications
                 ],
@@ -514,6 +524,16 @@ def api_post_stats(p_guid: str) -> flask.Response:
                     else None
                 ),
                 "model_call_id": identification.model_call_id,
+                "start_time": (
+                    round(identification.start_time, 1)
+                    if getattr(identification, "start_time", None) is not None
+                    else None
+                ),
+                "end_time": (
+                    round(identification.end_time, 1)
+                    if getattr(identification, "end_time", None) is not None
+                    else None
+                ),
                 "segment_sequence_num": segment.sequence_num,
                 "segment_start_time": round(segment.start_time, 1),
                 "segment_end_time": round(segment.end_time, 1),

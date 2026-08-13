@@ -13,6 +13,7 @@ from typing import Any, cast
 import litellm
 from jinja2 import Template
 
+from podcast_processor.content_guard import normalize_word_timestamps
 from podcast_processor.llm_model_call_utils import (
     extract_litellm_content,
     extract_litellm_finish_reason,
@@ -36,11 +37,7 @@ class WordBoundaryRefinement:
 
 
 class WordBoundaryRefiner:
-    """Refine ad start boundary by finding the first ad word and estimating its time.
-
-    This refiner is intentionally heuristic-timed because we only have segment-level
-    timestamps today.
-    """
+    """Refine ad start/end using phrase matches, preferring stored Whisper word times."""
 
     def __init__(self, config: Config, logger: logging.Logger | None = None):
         self.config = config
@@ -711,15 +708,63 @@ Return only one JSON object (no markdown/code fences, no analysis text) with:
         if not phrase_tokens:
             return None
 
-        # Search order:
-        # 1) preferred segment (if provided)
-        # 2) other provided context segments (ad-range ±2)
+        candidates = self._phrase_time_candidates(
+            all_segments=all_segments,
+            context_segments=context_segments,
+            preferred_segment_seq=preferred_segment_seq,
+            direction=direction,
+        )
+
+        for seg in candidates:
+            start_time = float(seg.get("start_time", 0.0))
+            end_time = float(seg.get("end_time", start_time))
+            duration = max(0.0, end_time - start_time)
+            words = [w.lower() for w in self._split_words(str(seg.get("text", "")))]
+            if not words or duration <= 0.0:
+                continue
+
+            match = self._find_phrase_match(
+                words=words,
+                phrase_tokens=phrase_tokens,
+                direction=direction,
+                max_words=4,
+            )
+            if match is None:
+                continue
+
+            match_start_idx, match_end_idx = match
+            stored = self._time_from_stored_words(
+                seg,
+                match_start_idx=match_start_idx,
+                match_end_idx=match_end_idx,
+                direction=direction,
+            )
+            if stored is not None:
+                return stored
+            seconds_per_word = duration / float(len(words))
+            if direction == "start":
+                estimated = start_time + (float(match_start_idx) * seconds_per_word)
+                return min(estimated, end_time)
+
+            # direction == "end": end boundary at the end of the last matched word.
+            estimated = start_time + (float(match_end_idx + 1) * seconds_per_word)
+            return min(estimated, end_time)
+
+        return None
+
+    def _phrase_time_candidates(
+        self,
+        *,
+        all_segments: list[dict[str, Any]],
+        context_segments: list[dict[str, Any]],
+        preferred_segment_seq: Any,
+        direction: str,
+    ) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
         preferred_seg = self._find_segment(all_segments, preferred_segment_seq)
         if preferred_seg is not None:
             candidates.append(preferred_seg)
 
-        # De-duplicate and order additional candidates.
         ordered_context = list(context_segments or [])
         try:
             ordered_context.sort(key=lambda s: int(s.get("sequence_num", -1)))
@@ -742,35 +787,7 @@ Return only one JSON object (no markdown/code fences, no analysis text) with:
             if preferred_seq_int is not None and seq == preferred_seq_int:
                 continue
             candidates.append(seg)
-
-        for seg in candidates:
-            start_time = float(seg.get("start_time", 0.0))
-            end_time = float(seg.get("end_time", start_time))
-            duration = max(0.0, end_time - start_time)
-            words = [w.lower() for w in self._split_words(str(seg.get("text", "")))]
-            if not words or duration <= 0.0:
-                continue
-
-            match = self._find_phrase_match(
-                words=words,
-                phrase_tokens=phrase_tokens,
-                direction=direction,
-                max_words=4,
-            )
-            if match is None:
-                continue
-
-            match_start_idx, match_end_idx = match
-            seconds_per_word = duration / float(len(words))
-            if direction == "start":
-                estimated = start_time + (float(match_start_idx) * seconds_per_word)
-                return min(estimated, end_time)
-
-            # direction == "end": end boundary at the end of the last matched word.
-            estimated = start_time + (float(match_end_idx + 1) * seconds_per_word)
-            return min(estimated, end_time)
-
-        return None
+        return candidates
 
     def _find_phrase_match(
         self,
@@ -847,6 +864,15 @@ Return only one JSON object (no markdown/code fences, no analysis text) with:
             word_index=word_index,
         )
 
+        stored = self._time_from_stored_words(
+            seg,
+            match_start_idx=resolved_index,
+            match_end_idx=resolved_index,
+            direction="start",
+        )
+        if stored is not None:
+            return stored
+
         # Heuristic timing: constant word duration within the segment.
         # words_per_second = num_words / segment_duration
         # seconds_per_word = 1 / words_per_second = segment_duration / num_words
@@ -854,6 +880,44 @@ Return only one JSON object (no markdown/code fences, no analysis text) with:
         estimated = start_time + (float(resolved_index) * seconds_per_word)
         # Guardrail: never return a start after the block end.
         return min(estimated, float(seg.get("end_time", end_time)))
+
+    def _time_from_stored_words(
+        self,
+        seg: dict[str, Any],
+        *,
+        match_start_idx: int,
+        match_end_idx: int,
+        direction: str,
+    ) -> float | None:
+        payload = normalize_word_timestamps(seg.get("words"))
+        if not payload:
+            return None
+        text_tokens = [
+            self._normalize_token(w).lower()
+            for w in self._split_words(str(seg.get("text", "")))
+        ]
+        payload_tokens = [
+            self._normalize_token(item["word"]).lower() for item in payload
+        ]
+        if payload_tokens != text_tokens and len(payload) != len(text_tokens):
+            return None
+        if match_start_idx < 0 or match_end_idx >= len(payload):
+            return None
+        start_bound = float(seg.get("start_time", 0.0))
+        end_bound = float(seg.get("end_time", start_bound))
+        if direction == "start":
+            return min(
+                max(float(payload[match_start_idx]["start"]), start_bound), end_bound
+            )
+        item = payload[match_end_idx]
+        end_raw = item.get("end")
+        if end_raw is not None:
+            estimated = float(end_raw)
+        elif match_end_idx + 1 < len(payload):
+            estimated = float(payload[match_end_idx + 1]["start"])
+        else:
+            estimated = end_bound
+        return min(max(estimated, start_bound), end_bound)
 
     def _find_segment(
         self, all_segments: list[dict[str, Any]], segment_seq: Any

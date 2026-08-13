@@ -119,7 +119,8 @@ CONTENT-AWARE TAXONOMY:
 
 JSON CONTRACT (strict):
 - Always respond with: {{"ad_segments": [...], "content_type": "<taxonomy>", "confidence": <0.0-1.0>}}
-- Each ad_segments item must be: {{"segment_offset": <seconds.float>, "confidence": <0.0-1.0>}}
+- Prefer each ad_segments item as: {{"start": <seconds.float>, "end": <seconds.float>, "confidence": <0.0-1.0>}}
+- {{"segment_offset": <seconds.float>, "confidence": <0.0-1.0>}} is also accepted (the line's [X] timestamp).
 - If there are no ads, respond with: {valid_empty_example} (no extra keys).
 
 DURATION AND CUE GUIDANCE:

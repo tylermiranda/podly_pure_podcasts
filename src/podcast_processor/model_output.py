@@ -1,16 +1,30 @@
+from __future__ import annotations
+
 import json
 import logging
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 logger = logging.getLogger(__name__)
 
 
 class AdSegmentPrediction(BaseModel):
-    segment_offset: float
     confidence: float
+    segment_offset: float | None = None
+    start: float | None = None
+    end: float | None = None
+
+    @model_validator(mode="after")
+    def _require_time_anchor(self) -> AdSegmentPrediction:
+        if self.start is None and self.segment_offset is None:
+            raise ValueError("start or segment_offset is required")
+        if self.start is None:
+            self.start = self.segment_offset
+        if self.segment_offset is None:
+            self.segment_offset = self.start
+        return self
 
 
 class AdSegmentPredictionList(BaseModel):
@@ -98,16 +112,38 @@ def _coerce_ad_segment_payload(data: Any) -> Any:
 
     Flash-class models sometimes emit a single prediction object
     ``{"segment_offset": 0.0, "confidence": 0.95}`` (or a bare list of those)
-    instead of ``{"ad_segments": [...]}``.
+    instead of ``{"ad_segments": [...]}``. Span-shaped
+    ``{"start": ..., "end": ..., "confidence": ...}`` is also accepted.
     """
     if isinstance(data, list):
-        return {"ad_segments": data}
+        return {"ad_segments": [_normalize_prediction_item(item) for item in data]}
     if isinstance(data, dict):
         if "ad_segments" in data:
+            items = data.get("ad_segments")
+            if isinstance(items, list):
+                return {
+                    **data,
+                    "ad_segments": [_normalize_prediction_item(i) for i in items],
+                }
             return data
-        if "segment_offset" in data and "confidence" in data:
-            return {"ad_segments": [data]}
+        if _looks_like_prediction_item(data):
+            return {"ad_segments": [_normalize_prediction_item(data)]}
     return data
+
+
+def _looks_like_prediction_item(data: dict[str, Any]) -> bool:
+    if "segment_offset" in data or "start" in data:
+        return True
+    return False
+
+
+def _normalize_prediction_item(item: Any) -> Any:
+    if not isinstance(item, dict):
+        return item
+    normalized = dict(item)
+    if "confidence" not in normalized:
+        normalized["confidence"] = 0.9
+    return normalized
 
 
 def _validate_predictions(text: str) -> AdSegmentPredictionList:
