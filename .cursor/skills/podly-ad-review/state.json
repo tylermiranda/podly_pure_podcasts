@@ -3,7 +3,7 @@
   "status": "idle",
   "podly_url": "http://192.168.1.5:5001",
   "lmstudio_base_url": "http://192.168.1.24:1234/v1",
-  "llm_model": "openai/google/gemma-4-12b",
+  "llm_model": "openai/~deepseek/deepseek-v4-flash-latest",
   "whisper_base_url": "http://192.168.1.24:9001/v1",
   "watched_feed_ids": [
     1,
@@ -40,21 +40,22 @@
   "max_ladder_steps": 6,
   "seen": {
     "2e6155cd-e5f7-4427-acfc-c8b0e0848efc": {
-      "pass": true,
-      "ad_pct": 12.2,
-      "checked_at": "2026-08-12T18:21:28.660830Z",
-      "fixed": true,
-      "restored_audio": true
+      "pass": false,
+      "ad_pct": 14.7,
+      "checked_at": "2026-08-12T21:23:15.347432Z",
+      "needs_attention": true
     },
     "1aa0997e-6915-5a56-be13-de8a4d075a00": {
       "pass": false,
-      "needs_attention": true,
-      "checked_at": "2026-08-12T17:50:41.368619Z"
+      "ad_pct": 0.0,
+      "checked_at": "2026-08-12T21:23:15.347432Z",
+      "needs_attention": true
     },
     "e767ce25-de1e-4071-b624-f00fd23b5430": {
       "pass": false,
-      "needs_attention": true,
-      "checked_at": "2026-08-12T17:50:41.368619Z"
+      "ad_pct": 12.1,
+      "checked_at": "2026-08-12T21:23:15.347432Z",
+      "needs_attention": true
     },
     "fc435c62-2480-55f6-ae86-512a7c9ca67a": {
       "pass": false,
@@ -90,13 +91,60 @@
   "failures": {
     "1aa0997e-6915-5a56-be13-de8a4d075a00": {
       "needs_attention": true,
-      "reason": "outro content_as_ad",
-      "checked_at": "2026-08-12T17:50:41.368619Z"
+      "reason": "ad_pct_band",
+      "last_score": {
+        "pass": false,
+        "ad_pct": 0.0,
+        "sponsor_hits": 0,
+        "content_as_ad": 0,
+        "bleeds": 0,
+        "failures": [
+          {
+            "type": "ad_pct_band",
+            "ad_pct": 0.0,
+            "band": [
+              5.0,
+              28.0
+            ],
+            "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+          }
+        ],
+        "warnings": [
+          "ad_pct 0.0 outside soft band [5.0,28.0]"
+        ],
+        "checked_at": "2026-08-12T21:23:15.347432Z"
+      },
+      "checked_at": "2026-08-12T21:23:15.347432Z"
     },
     "e767ce25-de1e-4071-b624-f00fd23b5430": {
       "needs_attention": true,
-      "reason": "underdetect",
-      "checked_at": "2026-08-12T17:50:41.368619Z"
+      "reason": "content_as_ad",
+      "last_score": {
+        "pass": false,
+        "ad_pct": 12.1,
+        "sponsor_hits": 2,
+        "content_as_ad": 1,
+        "bleeds": 1,
+        "failures": [
+          {
+            "type": "content_as_ad",
+            "start": 111.7,
+            "end": 130.1,
+            "confidence": 0.9,
+            "text": "Availability and coverage vary by state and insurance plan. For a generation of kids, we only knew the big three. The three main networks that delivered us shows like The A-Team, K"
+          },
+          {
+            "type": "boundary_bleed",
+            "start": 919.4,
+            "end": 938.3,
+            "confidence": 0.98,
+            "text": "Download the Jerry app or visit jerry.ai slash libsyn today. That's j-e-r-r-y dot a-i slash l-i-b-s-y-n. From the viewpoint of a kid growing up in the 80s, it looked as if it was g"
+          }
+        ],
+        "warnings": [],
+        "checked_at": "2026-08-12T21:23:15.347432Z"
+      },
+      "checked_at": "2026-08-12T21:23:15.347432Z"
     },
     "fc435c62-2480-55f6-ae86-512a7c9ca67a": {
       "needs_attention": true,
@@ -158,6 +206,33 @@
         "feed_title": "History of the 90s"
       },
       "checked_at": "2026-08-12T17:50:31.887339Z"
+    },
+    "2e6155cd-e5f7-4427-acfc-c8b0e0848efc": {
+      "needs_attention": true,
+      "reason": "ad_pct_band",
+      "last_score": {
+        "pass": false,
+        "ad_pct": 14.7,
+        "sponsor_hits": 13,
+        "content_as_ad": 0,
+        "bleeds": 0,
+        "failures": [
+          {
+            "type": "ad_pct_band",
+            "ad_pct": 14.7,
+            "band": [
+              2.0,
+              14.0
+            ],
+            "detail": "ad_pct 14.7 outside soft band [2.0,14.0]"
+          }
+        ],
+        "warnings": [
+          "ad_pct 14.7 outside soft band [2.0,14.0]"
+        ],
+        "checked_at": "2026-08-12T21:23:15.347432Z"
+      },
+      "checked_at": "2026-08-12T21:23:15.347432Z"
     }
   },
   "iteration_log": [
@@ -498,9 +573,81 @@
         }
       ],
       "warnings": []
+    },
+    {
+      "ts": "2026-08-12T21:23:15.347432Z",
+      "guid": "2e6155cd-e5f7-4427-acfc-c8b0e0848efc",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": false,
+      "ad_pct": 14.7,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 14.7,
+          "band": [
+            2.0,
+            14.0
+          ],
+          "detail": "ad_pct 14.7 outside soft band [2.0,14.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 14.7 outside soft band [2.0,14.0]"
+      ],
+      "note": "deepseek-flash content_guard reprocess, refiners off"
+    },
+    {
+      "ts": "2026-08-12T21:23:15.347432Z",
+      "guid": "1aa0997e-6915-5a56-be13-de8a4d075a00",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": false,
+      "ad_pct": 0.0,
+      "failures": [
+        {
+          "type": "ad_pct_band",
+          "ad_pct": 0.0,
+          "band": [
+            5.0,
+            28.0
+          ],
+          "detail": "ad_pct 0.0 outside soft band [5.0,28.0]"
+        }
+      ],
+      "warnings": [
+        "ad_pct 0.0 outside soft band [5.0,28.0]"
+      ],
+      "note": "deepseek-flash content_guard reprocess, refiners off"
+    },
+    {
+      "ts": "2026-08-12T21:23:15.347432Z",
+      "guid": "e767ce25-de1e-4071-b624-f00fd23b5430",
+      "feed_id": 11,
+      "feed_title": "Everything 80s",
+      "pass": false,
+      "ad_pct": 12.1,
+      "failures": [
+        {
+          "type": "content_as_ad",
+          "start": 111.7,
+          "end": 130.1,
+          "confidence": 0.9,
+          "text": "Availability and coverage vary by state and insurance plan. For a generation of kids, we only knew the big three. The three main networks that delivered us shows like The A-Team, K"
+        },
+        {
+          "type": "boundary_bleed",
+          "start": 919.4,
+          "end": 938.3,
+          "confidence": 0.98,
+          "text": "Download the Jerry app or visit jerry.ai slash libsyn today. That's j-e-r-r-y dot a-i slash l-i-b-s-y-n. From the viewpoint of a kid growing up in the 80s, it looked as if it was g"
+        }
+      ],
+      "warnings": [],
+      "note": "deepseek-flash content_guard reprocess, refiners off"
     }
   ],
   "local_num_segments_per_prompt": 24,
-  "last_run_at": "2026-08-12T17:50:31.887812Z",
-  "notes": "Bootstrap 2026-08-12: LM Studio requires skipping response_format=json_object (hot-patched Tower). Segments=24 for 8k context. PM pass@11.9%. H90 plateau: outro content_as_ad. E80 underdetect/slow \u2014 needs code or larger model."
+  "last_run_at": "2026-08-12T21:23:15.347432Z",
+  "notes": "DeepSeek Flash reprocess 2026-08-12 (refiners off, segments=60, content_guard hot-patched). PM 14.7% band-fail + unlabeled interview FPs ~1180-1299s. H90 0% \u2014 ModelCall 953 failed_permanent empty response. E80 12.1% mixed bleeds still in labels (Grow disclaimer + cold-open; Jerry.ai + cold-open)."
 }
