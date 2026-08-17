@@ -181,6 +181,54 @@ def test_save_correction_route_recuts(app) -> None:
         )
 
 
+def test_save_correction_route_skips_recut_when_apply_false(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-no-recut-guid",
+            rss_url="https://example.com/corr-no-recut.xml",
+        )
+        segment = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=1.0,
+            end_time=8.0,
+            text="head to example.com for details",
+        )
+        db.session.add(segment)
+        db.session.commit()
+        guid = post.guid
+
+    client = app.test_client()
+    with mock.patch(
+        "podcast_processor.ad_corrections.recut_post_audio",
+    ) as recut_mock:
+        response = client.post(
+            f"/api/posts/{guid}/ad-corrections",
+            json={
+                "label": "ad",
+                "kind": "missed_ad",
+                "start_time": 1.0,
+                "end_time": 8.0,
+                "apply": False,
+            },
+        )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["correction"]["id"]
+    assert payload.get("apply") is None
+    recut_mock.assert_not_called()
+    with app.app_context():
+        assert (
+            AdCorrection.query.filter_by(
+                post_id=payload["correction"]["post_id"]
+            ).count()
+            == 1
+        )
+
+
 def test_save_correction_route_persists_when_recut_fails(app) -> None:
     app.testing = True
     app.register_blueprint(post_bp)

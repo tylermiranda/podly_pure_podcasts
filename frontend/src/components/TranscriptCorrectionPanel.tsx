@@ -162,6 +162,11 @@ export default function TranscriptCorrectionPanel({
     return () => window.removeEventListener('mouseup', onUp);
   }, [playFrom, segments]);
 
+  const refreshStatsOnly = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
+    await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
+  };
+
   const refreshAfterRecut = async () => {
     feedsApi.bumpProcessedAudio(episodeGuid);
     reloadProcessedAudio(episodeGuid);
@@ -187,19 +192,19 @@ export default function TranscriptCorrectionPanel({
         end_time: end,
         segment_ids: selectedSegments.map((segment) => segment.id),
         reason: reason.trim() || undefined,
-        apply: true,
+        apply: false,
       });
     },
     onSuccess: async () => {
       setError(null);
-      setStatus('Correction saved and processed audio recut.');
-      toast.success('Processed audio updated');
-      await refreshAfterRecut();
+      setStatus('Correction saved — recut when you are done marking spans.');
+      toast.success('Correction saved');
+      await refreshStatsOnly();
     },
     onError: async (err: unknown) => {
       setStatus(null);
       setError(getHttpErrorInfo(err).message);
-      await refreshAfterRecut();
+      await refreshStatsOnly();
     },
   });
 
@@ -264,10 +269,17 @@ export default function TranscriptCorrectionPanel({
         {canEdit && (
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-left">
             <p className="text-sm text-indigo-900 mb-3">
-              Drag across rows or edit start/end seconds, then mark the span as ad or content.
-              That saves the correction and recuts the processed MP3 from the original audio.
-              You do not need Reprocess (that re-runs Whisper/LLM). Effective cuts are highlighted in red.
+              Drag across rows or edit start/end seconds, then mark spans as ad or content while
+              listening to the original audio. Mark ad/content saves each correction; click Recut
+              audio once when finished to update the processed MP3. You do not need Reprocess
+              (that re-runs Whisper/LLM). Effective cuts are highlighted in red.
             </p>
+            {corrections.length > 0 && (
+              <p className="text-sm text-indigo-800 mb-3">
+                {corrections.length} correction{corrections.length === 1 ? '' : 's'} saved — click
+                Recut audio to update the episode.
+              </p>
+            )}
             <div className="flex flex-wrap items-end gap-3">
               <label className="text-xs text-gray-700">
                 Start (s)
@@ -315,25 +327,25 @@ export default function TranscriptCorrectionPanel({
                 type="button"
                 onClick={() => {
                   setKind('missed_ad');
-                  setStatus('Saving correction and recutting…');
+                  setStatus('Saving correction…');
                   saveMutation.mutate('ad');
                 }}
                 disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
-                {saveMutation.isPending ? 'Recutting…' : 'Mark ad'}
+                {saveMutation.isPending ? 'Saving…' : 'Mark ad'}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setKind(kind === 'missed_ad' ? 'false_positive' : kind);
-                  setStatus('Saving correction and recutting…');
+                  setStatus('Saving correction…');
                   saveMutation.mutate('content');
                 }}
                 disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
-                {saveMutation.isPending ? 'Recutting…' : 'Mark content'}
+                {saveMutation.isPending ? 'Saving…' : 'Mark content'}
               </button>
               <button
                 type="button"
@@ -342,7 +354,7 @@ export default function TranscriptCorrectionPanel({
                   recutMutation.mutate();
                 }}
                 disabled={saveMutation.isPending || recutMutation.isPending}
-                className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-50"
               >
                 {recutMutation.isPending ? 'Recutting…' : 'Recut audio'}
               </button>
