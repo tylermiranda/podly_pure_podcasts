@@ -245,6 +245,38 @@ def test_transcribe_persists_word_timestamps(
         ]
 
 
+def test_transcribe_warns_when_remote_result_has_no_word_timestamps(
+    test_config: Config,
+    app: Flask,
+) -> None:
+    with app.app_context():
+        feed = Feed(title="Test Feed", rss_url="http://example.com/no-words.xml")
+        post = Post(
+            feed=feed,
+            guid="guid-no-words",
+            download_url="http://example.com/no-words.mp3",
+            title="Test Post",
+            unprocessed_audio_path="/path/to/audio.mp3",
+        )
+        db.session.add_all([feed, post])
+        db.session.commit()
+
+        logger = MagicMock(spec=logging.Logger)
+        manager = TranscriptionManager(
+            logger,
+            test_config,
+            db_session=db.session,
+            transcriber=MockTranscriber(
+                [Segment(start=0.0, end=5.0, text="No words in this segment")]
+            ),
+        )
+
+        manager.transcribe(post)
+
+        logger.warning.assert_called_once()
+        assert "TRANSCRIBE_NO_WORD_TIMESTAMPS" in logger.warning.call_args.args[0]
+
+
 def test_transcribe_handles_error(
     test_config: Config,
     test_logger: logging.Logger,

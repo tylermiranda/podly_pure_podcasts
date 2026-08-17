@@ -201,9 +201,22 @@ class TranscriptionManager:
             pydantic_segments = self.transcriber.transcribe(
                 post.unprocessed_audio_path, language=effective_language
             )
+            words_count = sum(len(segment.words or []) for segment in pydantic_segments)
             self.logger.info(
-                f"[TRANSCRIBE_COMPLETE] Transcription by {self.transcriber.model_name} for post {post.id} resulted in {len(pydantic_segments)} segments."
+                "[TRANSCRIBE_COMPLETE] Transcription by %s for post %s resulted in "
+                "%s segments and %s word timestamps.",
+                self.transcriber.model_name,
+                post.id,
+                len(pydantic_segments),
+                words_count,
             )
+            if pydantic_segments and words_count == 0:
+                self.logger.warning(
+                    "[TRANSCRIBE_NO_WORD_TIMESTAMPS] %s returned no word timestamps "
+                    "for post %s. Mixed-segment cuts will use text-ratio fallback.",
+                    self.transcriber.model_name,
+                    post.id,
+                )
 
             segments_payload = [
                 {
