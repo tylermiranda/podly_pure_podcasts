@@ -255,16 +255,120 @@ def merge_overlapping_windows(
     return merged
 
 
+def window_overlaps_bounds(
+    start: float,
+    end: float,
+    bounds: list[tuple[float, float]] | None,
+) -> bool:
+    if not bounds:
+        return False
+    for bound_start, bound_end in bounds:
+        if start < bound_end and end > bound_start:
+            return True
+    return False
+
+
+def subtract_windows(
+    windows: list[tuple[float, float]],
+    holes: list[tuple[float, float]],
+) -> list[tuple[float, float]]:
+    """Remove `holes` from `windows`, preserving leftover ad spans."""
+    if not windows:
+        return []
+    if not holes:
+        return merge_overlapping_windows(windows)
+
+    remaining: list[tuple[float, float]] = []
+    for start, end in windows:
+        pieces = [(start, end)]
+        for hole_start, hole_end in holes:
+            next_pieces: list[tuple[float, float]] = []
+            for piece_start, piece_end in pieces:
+                if hole_end <= piece_start or hole_start >= piece_end:
+                    next_pieces.append((piece_start, piece_end))
+                    continue
+                if piece_start < hole_start:
+                    next_pieces.append((piece_start, hole_start))
+                if hole_end < piece_end:
+                    next_pieces.append((hole_end, piece_end))
+            pieces = next_pieces
+        remaining.extend(piece for piece in pieces if piece[1] - piece[0] > 0.05)
+    return merge_overlapping_windows(remaining)
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _correction_label_window(correction: Any) -> tuple[str, float, float] | None:
+    if isinstance(correction, dict):
+        label = correction.get("label")
+        start = _as_float(correction.get("start_time"))
+        end = _as_float(correction.get("end_time"))
+    else:
+        label = getattr(correction, "label", None)
+        start = _as_float(getattr(correction, "start_time", None))
+        end = _as_float(getattr(correction, "end_time", None))
+    if label not in {"ad", "content"} or start is None or end is None:
+        return None
+    if end <= start:
+        return None
+    return str(label), start, end
+
+
+def content_bounds_from_corrections(
+    corrections: list[Any] | None,
+) -> list[tuple[float, float]]:
+    bounds: list[tuple[float, float]] = []
+    for correction in corrections or []:
+        parsed = _correction_label_window(correction)
+        if parsed is None:
+            continue
+        label, start, end = parsed
+        if label == "content":
+            bounds.append((start, end))
+    return merge_overlapping_windows(bounds)
+
+
+def apply_corrections_to_windows(
+    windows: list[tuple[float, float]],
+    corrections: list[Any] | None,
+) -> list[tuple[float, float]]:
+    """Apply human overrides last: content punches holes; ad windows are added."""
+    ads = list(windows)
+    holes: list[tuple[float, float]] = []
+    for correction in corrections or []:
+        parsed = _correction_label_window(correction)
+        if parsed is None:
+            continue
+        label, start, end = parsed
+        if label == "ad":
+            ads.append((start, end))
+        else:
+            holes.append((start, end))
+    return subtract_windows(merge_overlapping_windows(ads), holes)
+
+
 def _gap_blocks_ad_fill(
     segments: list[Any],
     gap_start: float,
     gap_end: float,
     repeated: set[str],
+    content_bounds: list[tuple[float, float]] | None = None,
 ) -> bool:
+    if window_overlaps_bounds(gap_start, gap_end, content_bounds):
+        return True
     for segment in segments:
         start, end = _segment_bounds(segment)
         if end <= gap_start + 0.05 or start >= gap_end - 0.05:
             continue
+        if window_overlaps_bounds(start, end, content_bounds):
+            return True
         if not is_absorbable_ad_copy(segment, repeated):
             return True
     return False
@@ -276,6 +380,7 @@ def fill_ad_holes(
     *,
     max_gap: float = AD_HOLE_FILL_SECONDS,
     repeated: set[str] | None = None,
+    content_bounds: list[tuple[float, float]] | None = None,
 ) -> list[tuple[float, float]]:
     """Merge nearby ad windows when the unlabeled gap is not show content."""
     ordered = merge_overlapping_windows(windows)
@@ -289,7 +394,11 @@ def fill_ad_holes(
         prev_start, prev_end = filled[-1]
         gap = start - prev_end
         if 0 < gap <= max_gap and not _gap_blocks_ad_fill(
-            segments, prev_end, start, known_repeated
+            segments,
+            prev_end,
+            start,
+            known_repeated,
+            content_bounds=content_bounds,
         ):
             filled[-1] = (prev_start, end)
         else:
@@ -304,6 +413,7 @@ def lead_in_ad_windows(
     max_lead: float = AD_LEAD_IN_SECONDS,
     max_gap: float = AD_LEAD_IN_MAX_GAP_SECONDS,
     repeated: set[str] | None = None,
+    content_bounds: list[tuple[float, float]] | None = None,
 ) -> list[tuple[float, float]]:
     """Extend each ad window backward through unlabeled ad-copy, not cold-opens."""
     if not windows:
@@ -325,6 +435,8 @@ def lead_in_ad_windows(
                 break
             if cursor - seg_end > max_gap:
                 break
+            if window_overlaps_bounds(seg_start, seg_end, content_bounds):
+                break
             if not is_absorbable_ad_copy(seg, known_repeated):
                 break
             new_start = seg_start
@@ -340,6 +452,7 @@ def trail_out_ad_windows(
     max_trail: float = AD_TRAIL_OUT_SECONDS,
     max_gap: float = AD_TRAIL_OUT_MAX_GAP_SECONDS,
     repeated: set[str] | None = None,
+    content_bounds: list[tuple[float, float]] | None = None,
 ) -> list[tuple[float, float]]:
     """Extend each ad window forward through unlabeled commercial copy."""
     if not windows:
@@ -361,6 +474,8 @@ def trail_out_ad_windows(
                 break
             if seg_start - cursor > max_gap:
                 break
+            if window_overlaps_bounds(seg_start, seg_end, content_bounds):
+                break
             if not is_absorbable_ad_copy(seg, known_repeated):
                 break
             new_end = max(new_end, seg_end)
@@ -372,15 +487,27 @@ def trail_out_ad_windows(
 def expand_cut_windows(
     windows: list[tuple[float, float]],
     segments: list[Any],
+    *,
+    content_bounds: list[tuple[float, float]] | None = None,
 ) -> list[tuple[float, float]]:
     """Recover full ad reads from CTA-only LLM spans."""
     repeated = repeated_creative_texts(segments)
-    return fill_ad_holes(
+    expanded = fill_ad_holes(
         trail_out_ad_windows(
-            lead_in_ad_windows(windows, segments, repeated=repeated),
+            lead_in_ad_windows(
+                windows,
+                segments,
+                repeated=repeated,
+                content_bounds=content_bounds,
+            ),
             segments,
             repeated=repeated,
+            content_bounds=content_bounds,
         ),
         segments,
         repeated=repeated,
+        content_bounds=content_bounds,
     )
+    if content_bounds:
+        return subtract_windows(expanded, content_bounds)
+    return expanded

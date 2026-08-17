@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from podcast_processor.ad_spans import expand_cut_windows, identification_cut_window
+from podcast_processor.ad_spans import (
+    apply_corrections_to_windows,
+    content_bounds_from_corrections,
+    expand_cut_windows,
+    identification_cut_window,
+)
 
 
 def count_model_calls(
@@ -125,13 +130,20 @@ def final_cut_windows(
     identifications: Iterable[Any],
     transcript_segments: Iterable[Any],
     refined_windows: list[tuple[float, float]] | None = None,
+    corrections: list[Any] | None = None,
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
     """Return (labeled blocks, expanded final cut blocks)."""
     labeled = labeled_cut_windows(identifications)
     labeled_blocks = merge_time_windows(labeled, gap_seconds=1.0)
     source = refined_windows or labeled
-    expanded = expand_cut_windows(source, list(transcript_segments))
-    return labeled_blocks, merge_time_windows(expanded, gap_seconds=1.0)
+    content_bounds = content_bounds_from_corrections(corrections)
+    expanded = expand_cut_windows(
+        source,
+        list(transcript_segments),
+        content_bounds=content_bounds,
+    )
+    effective = apply_corrections_to_windows(expanded, corrections)
+    return labeled_blocks, merge_time_windows(effective, gap_seconds=1.0)
 
 
 def is_mixed_segment(

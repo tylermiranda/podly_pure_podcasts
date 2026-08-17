@@ -324,6 +324,47 @@ class Identification(db.Model):  # type: ignore[name-defined, misc]
         return f"<Identification {self.id} TS:{self.transcript_segment_id} MC:{self.model_call_id} L:{self.label} C:{confidence_str}>"
 
 
+class AdCorrection(db.Model):  # type: ignore[name-defined, misc]
+    """Immutable human ad/content override for an episode time window."""
+
+    __tablename__ = "ad_correction"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    post_id = db.Column(
+        db.Integer, db.ForeignKey("post.id"), nullable=False, index=True
+    )
+    feed_id = db.Column(
+        db.Integer, db.ForeignKey("feed.id"), nullable=False, index=True
+    )
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    kind = db.Column(db.String(32), nullable=False)
+    label = db.Column(db.String(16), nullable=False)
+    start_time = db.Column(db.Float, nullable=False)
+    end_time = db.Column(db.Float, nullable=False)
+    segment_ids = db.Column(db.JSON, nullable=True)
+    source_identification_ids = db.Column(db.JSON, nullable=True)
+    reason = db.Column(db.Text, nullable=True)
+    example_text = db.Column(db.Text, nullable=True)
+    transcript_model_call_id = db.Column(
+        db.Integer, db.ForeignKey("model_call.id"), nullable=True
+    )
+    stale = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    supersedes_id = db.Column(
+        db.Integer, db.ForeignKey("ad_correction.id"), nullable=True
+    )
+    created_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)
+
+    post = db.relationship("Post", backref=db.backref("ad_corrections", lazy="dynamic"))
+    feed = db.relationship("Feed", backref=db.backref("ad_corrections", lazy="dynamic"))
+    created_by_user = db.relationship("User")
+
+    def __repr__(self) -> str:
+        return (
+            f"<AdCorrection {self.id} P:{self.post_id} "
+            f"{self.label} {self.start_time:.1f}-{self.end_time:.1f}>"
+        )
+
+
 class JobsManagerRun(db.Model):  # type: ignore[name-defined, misc]
     __tablename__ = "jobs_manager_run"
 

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { feedsApi } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import TranscriptCorrectionPanel from './TranscriptCorrectionPanel';
 
 interface LLMProcessingStatsProps {
   episodeGuid: string;
@@ -18,6 +20,8 @@ export default function LLMProcessingStats({
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
   const [expandedModelCalls, setExpandedModelCalls] = useState<Set<number>>(new Set());
+  const { requireAuth, user } = useAuth();
+  const canEditCorrections = !requireAuth || user?.role === 'admin';
 
   const { data: stats, isLoading, error } = useQuery({
     queryKey: ['episode-stats', episodeGuid],
@@ -508,51 +512,16 @@ export default function LLMProcessingStats({
                   )}
 
                   {activeTab === 'transcript' && (
-                    <div>
-                      <h3 className="font-semibold text-gray-900 mb-4 text-left">Transcript Segments ({stats.transcript_segments?.length || 0})</h3>
-                      <div className="bg-white border rounded-lg overflow-hidden">
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full divide-y divide-gray-200">
-                            <thead className="bg-gray-50">
-                              <tr>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Seq #</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Range</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Label</th>
-                                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Text</th>
-                              </tr>
-                            </thead>
-                            <tbody className="bg-white divide-y divide-gray-200">
-                              {(stats.transcript_segments || []).map((segment) => (
-                                <tr key={segment.id} className={`hover:bg-gray-50 ${
-                                  segment.primary_label === 'ad' ? 'bg-red-50' : ''
-                                }`}>
-                                  <td className="px-4 py-3 text-sm text-gray-900">{segment.sequence_num}</td>
-                                  <td className="px-4 py-3 text-sm text-gray-600">
-                                    {segment.start_time}s - {segment.end_time}s
-                                  </td>
-                                  <td className="px-4 py-3">
-                                    <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                                      segment.primary_label === 'ad'
-                                        ? 'bg-red-100 text-red-800'
-                                        : 'bg-green-100 text-green-800'
-                                    }`}>
-                                      {segment.primary_label === 'ad'
-                                        ? (segment.mixed ? 'Ad (mixed)' : 'Ad')
-                                        : 'Content'}
-                                    </span>
-                                  </td>
-                                  <td className="px-4 py-3 text-sm text-gray-900 max-w-md">
-                                    <div className="truncate text-left" title={segment.text}>
-                                      {segment.text}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
+                    <TranscriptCorrectionPanel
+                      episodeGuid={episodeGuid}
+                      feedId={stats.post?.feed_id ?? 0}
+                      canEdit={canEditCorrections}
+                      segments={stats.transcript_segments || []}
+                      adBlocks={stats.processing_stats?.ad_blocks || []}
+                      corrections={stats.corrections || []}
+                      suggestedPromptSnippet={stats.suggested_prompt_snippet || null}
+                      existingPrompt={stats.custom_llm_ad_prompt || null}
+                    />
                   )}
 
                   {activeTab === 'identifications' && (

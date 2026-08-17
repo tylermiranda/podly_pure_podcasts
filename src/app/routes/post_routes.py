@@ -552,10 +552,18 @@ def api_post_stats(p_guid: str) -> flask.Response:
     # Calculate ad blocks and statistics for LLM-based processing.
     # ad_blocks are the expanded windows actually used for cutting; labeled_ad_blocks
     # are the raw LLM/cue identifications before recovery.
+    from podcast_processor.ad_corrections import (
+        load_active_corrections_for_post,
+        serialize_correction,
+        suggested_prompt_snippet,
+    )
+
+    active_corrections = load_active_corrections_for_post(post.id)
     labeled_ad_blocks, ad_blocks = final_cut_windows(
         identifications,
         transcript_segments,
         refined_windows=refined_windows or None,
+        corrections=active_corrections,
     )
     ad_time_seconds = sum(end - start for start, end in ad_blocks if end > start)
 
@@ -577,6 +585,7 @@ def api_post_stats(p_guid: str) -> flask.Response:
         "post": {
             "guid": post.guid,
             "title": post.title,
+            "feed_id": post.feed_id,
             "duration": post.duration,
             "release_date": (
                 post.release_date.isoformat() if post.release_date else None
@@ -616,6 +625,16 @@ def api_post_stats(p_guid: str) -> flask.Response:
         "transcript_segments": transcript_segments_data,
         "identifications": identifications_data,
         "chapters": chapters_data,
+        "corrections": [serialize_correction(row) for row in active_corrections],
+        "suggested_prompt_snippet": suggested_prompt_snippet(
+            feed_id=post.feed_id,
+            existing_prompt=(
+                getattr(feed, "custom_llm_ad_prompt", None) if feed else None
+            ),
+        ),
+        "custom_llm_ad_prompt": (
+            getattr(feed, "custom_llm_ad_prompt", None) if feed else None
+        ),
     }
 
     if _env_bool("PODLY_STATS_DEBUG", default=False):
@@ -648,6 +667,88 @@ def api_post_stats(p_guid: str) -> flask.Response:
         }
 
     return flask.jsonify(stats_data)
+
+
+@post_bp.route("/api/posts/<string:p_guid>/ad-corrections", methods=["POST"])
+def api_create_ad_correction(p_guid: str) -> ResponseReturnValue:
+    """Save an admin ad/content correction and recut from the new windows."""
+    post = Post.query.filter_by(guid=p_guid).first()
+    if post is None:
+        return flask.make_response(flask.jsonify({"error": "Post not found"}), 404)
+
+    user, error = require_admin("correct ad windows")
+    if error:
+        return error
+
+    payload = request.get_json(silent=True) or {}
+    params: dict[str, Any] = {
+        "post_id": post.id,
+        "label": payload.get("label"),
+        "kind": payload.get("kind"),
+        "start_time": payload.get("start_time"),
+        "end_time": payload.get("end_time"),
+        "segment_ids": payload.get("segment_ids"),
+        "source_identification_ids": payload.get("source_identification_ids"),
+        "reason": payload.get("reason"),
+        "supersedes_id": payload.get("supersedes_id"),
+        "created_by_user_id": getattr(user, "id", None),
+    }
+    result = writer_client.action("insert_ad_correction", params, wait=True)
+    if not result or not result.success:
+        return flask.make_response(
+            flask.jsonify(
+                {"error": getattr(result, "error", "Failed to save correction")}
+            ),
+            400,
+        )
+
+    apply_now = payload.get("apply", True)
+    apply_data: dict[str, Any] | None = None
+    if apply_now:
+        apply_result = writer_client.action(
+            "apply_ad_corrections",
+            {"post_id": post.id, "recut": True},
+            wait=True,
+        )
+        if not apply_result or not apply_result.success:
+            return flask.make_response(
+                flask.jsonify(
+                    {
+                        "error": getattr(
+                            apply_result, "error", "Failed to recut episode"
+                        ),
+                        "correction": result.data,
+                    }
+                ),
+                500,
+            )
+        apply_data = apply_result.data if isinstance(apply_result.data, dict) else None
+
+    return flask.jsonify({"correction": result.data, "apply": apply_data})
+
+
+@post_bp.route("/api/posts/<string:p_guid>/ad-corrections/apply", methods=["POST"])
+def api_apply_ad_corrections(p_guid: str) -> ResponseReturnValue:
+    """Recut processed audio from current effective correction windows."""
+    post = Post.query.filter_by(guid=p_guid).first()
+    if post is None:
+        return flask.make_response(flask.jsonify({"error": "Post not found"}), 404)
+
+    _, error = require_admin("recut this episode")
+    if error:
+        return error
+
+    result = writer_client.action(
+        "apply_ad_corrections",
+        {"post_id": post.id, "recut": True},
+        wait=True,
+    )
+    if not result or not result.success:
+        return flask.make_response(
+            flask.jsonify({"error": getattr(result, "error", "Failed to recut")}),
+            500,
+        )
+    return flask.jsonify(result.data if isinstance(result.data, dict) else {})
 
 
 @post_bp.route("/api/posts/<string:p_guid>/whitelist", methods=["POST"])

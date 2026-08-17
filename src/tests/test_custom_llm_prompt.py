@@ -230,3 +230,5 @@ class TestCustomPromptAppendedToSystemPrompt:
         assert "build_ad_classification_system_prompt" in classify_source
         assert "custom_llm_ad_prompt" in helper_source
         assert "prompt_tag" in helper_source
+        assert "retrieve_correction_examples" in classify_source
+        assert "examples_prompt" in helper_source

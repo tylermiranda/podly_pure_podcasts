@@ -105,6 +105,10 @@ def clear_post_processing_data_action(params: dict[str, Any]) -> dict[str, Any]:
     # Model calls
     db.session.query(ModelCall).filter_by(post_id=post.id).delete()
 
+    from podcast_processor.ad_corrections import mark_ad_corrections_stale_for_post
+
+    mark_ad_corrections_stale_for_post(post.id)
+
     # Processing jobs
     db.session.query(ProcessingJob).filter_by(post_guid=post.guid).delete()
 

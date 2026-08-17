@@ -234,14 +234,12 @@ class PodcastProcessor:
             try:
                 if os.path.exists(processed_audio_path):
                     self.logger.info(f"Audio already processed: {post}")
-                    # Update the database with the processed audio path
-                    self._remove_unprocessed_audio(post)
+                    # Keep source audio so admin recut can reuse it.
                     result = writer_client.update(
                         "Post",
                         post.id,
                         {
                             "processed_audio_path": processed_audio_path,
-                            "unprocessed_audio_path": None,
                         },
                         wait=True,
                     )
@@ -856,11 +854,9 @@ class PodcastProcessor:
         """
         Finalize processing: update database and mark job complete.
         """
-        # Update the database with the processed audio path
-        self._remove_unprocessed_audio(post)
+        # Keep source audio so admin recut can reuse the original file.
         update_data = {
             "processed_audio_path": processed_audio_path,
-            "unprocessed_audio_path": None,
         }
         if chapter_data is not None:
             update_data["chapter_data"] = chapter_data
@@ -912,8 +908,24 @@ class PodcastProcessor:
             DEFAULT_USER_PROMPT_TEMPLATE_PATH
         )
         system_prompt = self.get_system_prompt(DEFAULT_SYSTEM_PROMPT_PATH)
+        from podcast_processor.ad_corrections import (
+            format_correction_examples_prompt,
+            retrieve_correction_examples,
+        )
+
+        transcript_text = " ".join(
+            str(getattr(segment, "text", "") or "") for segment in transcript_segments
+        )
+        feed = post.feed
+        examples = retrieve_correction_examples(
+            feed_id=post.feed_id,
+            prompt_tag_id=getattr(feed, "prompt_tag_id", None),
+            query_text=transcript_text,
+        )
         system_prompt = self.build_ad_classification_system_prompt(
-            system_prompt, post.feed
+            system_prompt,
+            feed,
+            examples_prompt=format_correction_examples_prompt(examples),
         )
 
         self.ad_classifier.classify(
@@ -1091,8 +1103,13 @@ class PodcastProcessor:
             return f.read()
 
     @staticmethod
-    def build_ad_classification_system_prompt(base_prompt: str, feed: Any) -> str:
-        """Compose base → tag prompt → per-feed custom prompt."""
+    def build_ad_classification_system_prompt(
+        base_prompt: str,
+        feed: Any,
+        *,
+        examples_prompt: str | None = None,
+    ) -> str:
+        """Compose base → tag prompt → per-feed custom prompt → retrieved examples."""
         parts = [base_prompt]
         prompt_tag = getattr(feed, "prompt_tag", None)
         tag_prompt = (
@@ -1103,6 +1120,8 @@ class PodcastProcessor:
         custom_prompt = getattr(feed, "custom_llm_ad_prompt", None)
         if isinstance(custom_prompt, str) and custom_prompt.strip():
             parts.append(custom_prompt.strip())
+        if isinstance(examples_prompt, str) and examples_prompt.strip():
+            parts.append(examples_prompt.strip())
         return "\n\n".join(parts)
 
     def get_user_prompt_template(self, prompt_template_path: str) -> Template:

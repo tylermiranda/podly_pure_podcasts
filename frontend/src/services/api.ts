@@ -280,6 +280,7 @@ export const feedsApi = {
     post: {
       guid: string;
       title: string;
+      feed_id?: number;
       duration: number | null;
       release_date: string | null;
       whitelisted: boolean;
@@ -399,8 +400,52 @@ export const feedsApi = {
       }>;
       note?: string;
     } | null;
+    corrections?: Array<{
+      id: number;
+      post_id: number;
+      feed_id: number;
+      kind: 'missed_ad' | 'false_positive' | 'retime';
+      label: 'ad' | 'content';
+      start_time: number;
+      end_time: number;
+      segment_ids: number[] | null;
+      reason: string | null;
+      example_text: string | null;
+      stale: boolean;
+      supersedes_id: number | null;
+      transcript_model_call_id: number | null;
+      created_at: string | null;
+    }>;
+    suggested_prompt_snippet?: string | null;
+    custom_llm_ad_prompt?: string | null;
   }> => {
     const response = await api.get(`/api/posts/${guid}/stats`);
+    return response.data;
+  },
+
+  createAdCorrection: async (
+    guid: string,
+    payload: {
+      label: 'ad' | 'content';
+      kind?: 'missed_ad' | 'false_positive' | 'retime';
+      start_time: number;
+      end_time: number;
+      segment_ids?: number[];
+      reason?: string;
+      apply?: boolean;
+    }
+  ): Promise<{
+    correction: { id: number; post_id: number; start_time: number; end_time: number };
+    apply: { post_id: number; recut?: boolean } | null;
+  }> => {
+    const response = await api.post(`/api/posts/${guid}/ad-corrections`, payload);
+    return response.data;
+  },
+
+  applyAdCorrections: async (
+    guid: string
+  ): Promise<{ post_id: number; recut?: boolean; processed_audio_path?: string }> => {
+    const response = await api.post(`/api/posts/${guid}/ad-corrections/apply`);
     return response.data;
   },
 

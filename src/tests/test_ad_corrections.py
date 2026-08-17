@@ -1,0 +1,423 @@
+from types import SimpleNamespace
+from unittest import mock
+
+from app.extensions import db
+from app.models import (
+    AdCorrection,
+    Feed,
+    Identification,
+    ModelCall,
+    Post,
+    TranscriptSegment,
+)
+from app.routes.post_routes import post_bp
+from app.writer.actions.cleanup import (
+    clear_post_processing_data_action,
+    clear_post_processing_data_keep_transcript_action,
+)
+from app.writer.actions.processor import insert_ad_correction_action
+from podcast_processor.ad_corrections import (
+    format_correction_examples_prompt,
+    retrieve_correction_examples,
+    snap_range_to_words,
+    suggested_prompt_snippet,
+)
+from podcast_processor.ad_spans import apply_corrections_to_windows
+from podcast_processor.podcast_processor import PodcastProcessor
+
+
+def _make_feed_post(app, *, guid: str, rss_url: str):
+    feed = Feed(title=f"Feed {guid}", rss_url=rss_url)
+    db.session.add(feed)
+    db.session.commit()
+    post = Post(
+        feed_id=feed.id,
+        guid=guid,
+        download_url=f"https://example.com/{guid}.mp3",
+        title="Episode",
+        whitelisted=True,
+    )
+    db.session.add(post)
+    db.session.commit()
+    return feed, post
+
+
+def test_apply_corrections_punches_content_and_inserts_ad() -> None:
+    windows = [(0.0, 10.0)]
+    corrections = [
+        SimpleNamespace(label="content", start_time=3.0, end_time=5.0),
+        SimpleNamespace(label="ad", start_time=12.0, end_time=14.0),
+    ]
+    assert apply_corrections_to_windows(windows, corrections) == [
+        (0.0, 3.0),
+        (5.0, 10.0),
+        (12.0, 14.0),
+    ]
+
+
+def test_snap_range_to_words() -> None:
+    segment = SimpleNamespace(
+        words=[
+            {"word": "It", "start": 59.4, "end": 59.6},
+            {"word": "is", "start": 59.6, "end": 59.8},
+            {"word": "July", "start": 59.8, "end": 61.2},
+        ]
+    )
+    start, end = snap_range_to_words(59.5, 61.0, [segment])
+    assert start == 59.4
+    assert end == 61.2
+
+
+def test_insert_ad_correction_and_stats_payload(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-stats-guid", rss_url="https://example.com/corr-stats.xml"
+        )
+        segment = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=0.0,
+            end_time=10.0,
+            text="Hello from the sponsor, then the story.",
+            words=[
+                {"word": "Hello", "start": 0.0, "end": 1.0},
+                {"word": "story", "start": 5.0, "end": 6.0},
+            ],
+        )
+        db.session.add(segment)
+        db.session.commit()
+        model_call = ModelCall(
+            post_id=post.id,
+            first_segment_sequence_num=0,
+            last_segment_sequence_num=0,
+            model_name="test-model",
+            prompt="classify",
+            status="success",
+        )
+        db.session.add(model_call)
+        db.session.commit()
+        ident = Identification(
+            transcript_segment_id=segment.id,
+            model_call_id=model_call.id,
+            label="ad",
+            confidence=0.9,
+            start_time=0.0,
+            end_time=10.0,
+        )
+        db.session.add(ident)
+        db.session.commit()
+        guid = post.guid
+
+        result = insert_ad_correction_action(
+            {
+                "post_id": post.id,
+                "label": "content",
+                "kind": "false_positive",
+                "start_time": 5.0,
+                "end_time": 10.0,
+            }
+        )
+        db.session.commit()
+        assert result["id"] > 0
+
+        client = app.test_client()
+        response = client.get(f"/api/posts/{guid}/stats")
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload["corrections"]
+        assert payload["corrections"][0]["label"] == "content"
+        blocks = payload["processing_stats"]["ad_blocks"]
+        assert blocks
+        assert blocks[0]["start_time"] == 0.0
+        assert blocks[0]["end_time"] <= 5.0
+
+
+def test_save_correction_route_recuts(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-save-guid", rss_url="https://example.com/corr-save.xml"
+        )
+        segment = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=1.0,
+            end_time=8.0,
+            text="head to example.com for details",
+        )
+        db.session.add(segment)
+        db.session.commit()
+        guid = post.guid
+
+    client = app.test_client()
+    with mock.patch(
+        "podcast_processor.ad_corrections.recut_post_audio",
+        return_value={"post_id": 1, "recut": True},
+    ):
+        response = client.post(
+            f"/api/posts/{guid}/ad-corrections",
+            json={
+                "label": "ad",
+                "kind": "missed_ad",
+                "start_time": 1.0,
+                "end_time": 8.0,
+                "apply": True,
+            },
+        )
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["correction"]["id"]
+    assert payload["apply"]["recut"] is True
+    with app.app_context():
+        assert (
+            AdCorrection.query.filter_by(
+                post_id=payload["correction"]["post_id"]
+            ).count()
+            == 1
+        )
+
+
+def test_cleanup_marks_corrections_stale_but_keeps_rows(app) -> None:
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-clean-guid", rss_url="https://example.com/corr-clean.xml"
+        )
+        correction = AdCorrection(
+            post_id=post.id,
+            feed_id=post.feed_id,
+            kind="missed_ad",
+            label="ad",
+            start_time=1.0,
+            end_time=2.0,
+            example_text="head to example.com",
+            stale=False,
+        )
+        db.session.add(correction)
+        db.session.commit()
+        post_id = post.id
+        correction_id = correction.id
+
+        clear_post_processing_data_action({"post_id": post_id})
+        db.session.commit()
+
+        row = db.session.get(AdCorrection, correction_id)
+        assert row is not None
+        assert row.stale is True
+
+
+def test_keep_transcript_cleanup_does_not_stale_corrections(app) -> None:
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-keep-guid", rss_url="https://example.com/corr-keep.xml"
+        )
+        correction = AdCorrection(
+            post_id=post.id,
+            feed_id=post.feed_id,
+            kind="false_positive",
+            label="content",
+            start_time=59.4,
+            end_time=61.4,
+            example_text="It is July the 1st, 1936.",
+            stale=False,
+        )
+        db.session.add(correction)
+        db.session.commit()
+        correction_id = correction.id
+
+        clear_post_processing_data_keep_transcript_action({"post_id": post.id})
+        db.session.commit()
+
+        row = db.session.get(AdCorrection, correction_id)
+        assert row is not None
+        assert row.stale is False
+
+
+def test_stale_corrections_are_not_applied_to_stats(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-stale-guid", rss_url="https://example.com/corr-stale.xml"
+        )
+        db.session.add(
+            AdCorrection(
+                post_id=post.id,
+                feed_id=post.feed_id,
+                kind="missed_ad",
+                label="ad",
+                start_time=1.0,
+                end_time=9.0,
+                example_text="buy now",
+                stale=True,
+            )
+        )
+        db.session.commit()
+        guid = post.guid
+
+    client = app.test_client()
+    response = client.get(f"/api/posts/{guid}/stats")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["corrections"] == []
+    assert payload["processing_stats"]["ad_blocks"] == []
+
+
+def test_retrieve_examples_same_feed_only(app) -> None:
+    with app.app_context():
+        feed_a, post_a = _make_feed_post(
+            app, guid="corr-ex-a", rss_url="https://example.com/corr-ex-a.xml"
+        )
+        _feed_b, _post_b = _make_feed_post(
+            app, guid="corr-ex-b", rss_url="https://example.com/corr-ex-b.xml"
+        )
+        db.session.add(
+            AdCorrection(
+                post_id=post_a.id,
+                feed_id=feed_a.id,
+                kind="false_positive",
+                label="content",
+                start_time=59.4,
+                end_time=61.4,
+                example_text="It is July the 1st, 1936.",
+                stale=False,
+            )
+        )
+        db.session.commit()
+
+        same_feed = retrieve_correction_examples(
+            feed_id=feed_a.id,
+            prompt_tag_id=None,
+            query_text="It is July the 1st, 1936. The story continues.",
+        )
+        other_feed = retrieve_correction_examples(
+            feed_id=_feed_b.id,
+            prompt_tag_id=None,
+            query_text="It is July the 1st, 1936. The story continues.",
+        )
+        assert same_feed
+        assert same_feed[0].example_text.startswith("It is July")
+        assert other_feed == []
+
+        prompt = format_correction_examples_prompt(same_feed)
+        assert "Human-reviewed examples for this show:" in prompt
+        assert "CONTENT" in prompt
+        composed = PodcastProcessor.build_ad_classification_system_prompt(
+            "BASE",
+            SimpleNamespace(prompt_tag=None, custom_llm_ad_prompt=None),
+            examples_prompt=prompt,
+        )
+        omitted = PodcastProcessor.build_ad_classification_system_prompt(
+            "BASE",
+            SimpleNamespace(prompt_tag=None, custom_llm_ad_prompt=None),
+            examples_prompt=format_correction_examples_prompt(other_feed),
+        )
+        assert "Human-reviewed examples" in composed
+        assert omitted == "BASE"
+
+
+def test_apply_route_recuts(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-apply-guid", rss_url="https://example.com/corr-apply.xml"
+        )
+        guid = post.guid
+        post_id = post.id
+
+    client = app.test_client()
+    with mock.patch(
+        "podcast_processor.ad_corrections.recut_post_audio",
+        return_value={"post_id": post_id, "recut": True},
+    ):
+        response = client.post(f"/api/posts/{guid}/ad-corrections/apply")
+    assert response.status_code == 200
+    assert response.get_json()["recut"] is True
+
+
+def test_get_ad_segments_applies_content_punch(app) -> None:
+    from podcast_processor.audio_processor import AudioProcessor
+    from shared.test_utils import create_standard_test_config
+
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app, guid="corr-audio-guid", rss_url="https://example.com/corr-audio.xml"
+        )
+        segment = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=0.0,
+            end_time=10.0,
+            text="This message comes from WISE. Visit wise.com.",
+        )
+        db.session.add(segment)
+        db.session.commit()
+        model_call = ModelCall(
+            post_id=post.id,
+            first_segment_sequence_num=0,
+            last_segment_sequence_num=0,
+            model_name="test-model",
+            prompt="classify",
+            status="success",
+        )
+        db.session.add(model_call)
+        db.session.commit()
+        db.session.add(
+            Identification(
+                transcript_segment_id=segment.id,
+                model_call_id=model_call.id,
+                label="ad",
+                confidence=0.99,
+                start_time=0.0,
+                end_time=10.0,
+            )
+        )
+        db.session.add(
+            AdCorrection(
+                post_id=post.id,
+                feed_id=post.feed_id,
+                kind="false_positive",
+                label="content",
+                start_time=6.0,
+                end_time=10.0,
+                example_text="Visit wise.com.",
+                stale=False,
+            )
+        )
+        db.session.commit()
+
+        windows = AudioProcessor(config=create_standard_test_config()).get_ad_segments(
+            post
+        )
+        assert windows
+        assert windows[0][0] == 0.0
+        assert windows[0][1] <= 6.0 + 0.05
+        assert all(end <= 6.05 for _start, end in windows)
+
+
+def test_suggested_prompt_snippet_requires_repeats(app) -> None:
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app, guid="corr-promo", rss_url="https://example.com/corr-promo.xml"
+        )
+        for index in range(3):
+            db.session.add(
+                AdCorrection(
+                    post_id=post.id,
+                    feed_id=feed.id,
+                    kind="false_positive",
+                    label="content",
+                    start_time=59.4 + index,
+                    end_time=61.4 + index,
+                    example_text="It is July the 1st, 1936.",
+                    stale=False,
+                )
+            )
+        db.session.commit()
+        snippet = suggested_prompt_snippet(feed_id=feed.id)
+        assert snippet is not None
+        assert "CONTENT" in snippet
+        assert "It is July" in snippet

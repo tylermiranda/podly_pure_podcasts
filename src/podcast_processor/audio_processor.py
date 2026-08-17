@@ -7,6 +7,8 @@ from app.writer.client import writer_client
 from podcast_processor.ad_merger import AdMerger
 from podcast_processor.ad_spans import (
     AD_MERGE_PROXIMITY_SECONDS,
+    apply_corrections_to_windows,
+    content_bounds_from_corrections,
     expand_cut_windows,
     identification_cut_window,
 )
@@ -78,7 +80,7 @@ class AudioProcessor:
             self.logger.info(
                 f"No ad segments found meeting criteria for post {post.id}."
             )
-            return []
+            return self._apply_post_corrections(post, [])
 
         # Get full segment objects with text for content analysis
         # Filter out any identifications with missing segments (DB integrity check)
@@ -121,7 +123,7 @@ class AudioProcessor:
             self.logger.info(
                 f"No valid ad segments with transcript data for post {post.id}."
             )
-            return []
+            return self._apply_post_corrections(post, [])
 
         # Content-aware merge
         ad_groups = self.ad_merger.merge(
@@ -147,7 +149,13 @@ class AudioProcessor:
         transcript_segments = self._transcript_segments_for_post(
             post, fallback=ad_segments_with_text
         )
-        expanded = expand_cut_windows(ad_segments_times, transcript_segments)
+        corrections = self._corrections_for_post(post)
+        content_bounds = content_bounds_from_corrections(corrections)
+        expanded = expand_cut_windows(
+            ad_segments_times,
+            transcript_segments,
+            content_bounds=content_bounds,
+        )
         if expanded != ad_segments_times:
             self.logger.info(
                 "Expanded %s ad windows to %s full-read windows for post %s",
@@ -155,7 +163,24 @@ class AudioProcessor:
                 len(expanded),
                 post.id,
             )
-        return expanded
+        return apply_corrections_to_windows(expanded, corrections)
+
+    def _corrections_for_post(self, post: Post) -> list[Any]:
+        if self._identification_query_provided:
+            return []
+        try:
+            from podcast_processor.ad_corrections import (
+                load_active_corrections_for_post,
+            )
+
+            return load_active_corrections_for_post(post.id)
+        except Exception:  # noqa: BLE001
+            return []
+
+    def _apply_post_corrections(
+        self, post: Post, windows: list[tuple[float, float]]
+    ) -> list[tuple[float, float]]:
+        return apply_corrections_to_windows(windows, self._corrections_for_post(post))
 
     def _transcript_segments_for_post(
         self, post: Post, *, fallback: list[TranscriptSegment]

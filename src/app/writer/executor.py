@@ -153,6 +153,16 @@ class CommandExecutor:
             "replace_identifications", writer_actions.replace_identifications_action
         )
         self.register_action(
+            "insert_ad_correction", writer_actions.insert_ad_correction_action
+        )
+        self.register_action(
+            "apply_ad_corrections", writer_actions.apply_ad_corrections_action
+        )
+        self.register_action(
+            "mark_ad_corrections_stale",
+            writer_actions.mark_ad_corrections_stale_action,
+        )
+        self.register_action(
             "update_user_last_active", writer_actions.update_user_last_active_action
         )
 

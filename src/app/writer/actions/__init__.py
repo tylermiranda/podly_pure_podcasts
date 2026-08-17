@@ -45,7 +45,12 @@ from .jobs import dequeue_job_action as dequeue_job_action
 from .jobs import mark_cancelled_action as mark_cancelled_action
 from .jobs import reassign_pending_jobs_action as reassign_pending_jobs_action
 from .jobs import update_job_status_action as update_job_status_action
+from .processor import apply_ad_corrections_action as apply_ad_corrections_action
+from .processor import insert_ad_correction_action as insert_ad_correction_action
 from .processor import insert_identifications_action as insert_identifications_action
+from .processor import (
+    mark_ad_corrections_stale_action as mark_ad_corrections_stale_action,
+)
 from .processor import mark_model_call_failed_action as mark_model_call_failed_action
 from .processor import replace_identifications_action as replace_identifications_action
 from .processor import replace_transcription_action as replace_transcription_action

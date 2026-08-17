@@ -213,3 +213,32 @@ def test_expand_cut_windows_recovers_dali_blocks_without_story_bleed() -> None:
         assert predicted[1] == pytest.approx(gold[1], abs=0.2)
     for stamp in NARRATIVE_START_TIMES:
         assert not windows_cover(windows, stamp)
+
+
+def test_trail_out_stops_at_human_content_bound() -> None:
+    segs = [
+        _seg(
+            id=1,
+            start=10.0,
+            end=20.0,
+            text="This message comes from WISE. Visit wise.com to learn more.",
+        ),
+        _seg(id=2, start=20.0, end=22.0, text="More soon."),
+        _seg(id=3, start=22.0, end=30.0, text="Welcome back to the show."),
+    ]
+    without_bound = trail_out_ad_windows([(10.0, 20.0)], segs)
+    assert without_bound[0][1] == pytest.approx(22.0)
+    with_bound = trail_out_ad_windows(
+        [(10.0, 20.0)], segs, content_bounds=[(20.0, 22.0)]
+    )
+    assert with_bound == [(10.0, 20.0)]
+
+
+def test_expand_cut_windows_does_not_cover_dali_date_with_content_bound() -> None:
+    segs = salvador_dali_segments()
+    windows = expand_cut_windows(
+        labeled_ad_windows(segs),
+        segs,
+        content_bounds=[(59.4, 61.4)],
+    )
+    assert not windows_cover(windows, 59.4)

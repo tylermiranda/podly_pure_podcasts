@@ -8,7 +8,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Identification, ModelCall, TranscriptSegment
+from app.models import AdCorrection, Identification, ModelCall, Post, TranscriptSegment
 
 
 def upsert_model_call_action(params: dict[str, Any]) -> dict[str, Any]:
@@ -207,6 +207,10 @@ def replace_transcription_action(params: dict[str, Any]) -> dict[str, Any]:
             Identification.transcript_segment_id.in_(seg_ids)
         ).delete(synchronize_session=False)
 
+    from podcast_processor.ad_corrections import mark_ad_corrections_stale_for_post
+
+    mark_ad_corrections_stale_for_post(post_id_i)
+
     db.session.query(TranscriptSegment).filter(
         TranscriptSegment.post_id == post_id_i
     ).delete(synchronize_session=False)
@@ -346,3 +350,128 @@ def replace_identifications_action(params: dict[str, Any]) -> dict[str, Any]:
 
     db.session.flush()
     return {"deleted": len(delete_ids), "inserted": int(inserted)}
+
+
+def insert_ad_correction_action(params: dict[str, Any]) -> dict[str, Any]:
+    from podcast_processor.ad_corrections import (
+        CORRECTION_KINDS,
+        CORRECTION_LABELS,
+        current_transcript_model_call_id,
+        default_kind_for_label,
+        example_text_for_range,
+        snap_range_to_words,
+    )
+
+    post_id = params.get("post_id")
+    if post_id is None:
+        raise ValueError("post_id is required")
+    post = db.session.get(Post, int(post_id))
+    if post is None:
+        raise ValueError(f"Post {post_id} not found")
+
+    label = str(params.get("label") or "").strip().lower()
+    if label not in CORRECTION_LABELS:
+        raise ValueError("label must be 'ad' or 'content'")
+
+    kind = str(params.get("kind") or default_kind_for_label(label)).strip().lower()
+    if kind not in CORRECTION_KINDS:
+        raise ValueError("kind must be missed_ad, false_positive, or retime")
+
+    try:
+        start_time = float(params["start_time"])
+        end_time = float(params["end_time"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("start_time and end_time are required") from exc
+    if end_time <= start_time:
+        raise ValueError("end_time must be greater than start_time")
+
+    segments = (
+        db.session.query(TranscriptSegment)
+        .filter(TranscriptSegment.post_id == post.id)
+        .order_by(TranscriptSegment.sequence_num)
+        .all()
+    )
+    start_time, end_time = snap_range_to_words(start_time, end_time, segments)
+
+    segment_ids = params.get("segment_ids")
+    if segment_ids is not None and not isinstance(segment_ids, list):
+        raise ValueError("segment_ids must be a list")
+    source_identification_ids = params.get("source_identification_ids")
+    if source_identification_ids is not None and not isinstance(
+        source_identification_ids, list
+    ):
+        raise ValueError("source_identification_ids must be a list")
+
+    supersedes_id = params.get("supersedes_id")
+    if supersedes_id is not None:
+        superseded = db.session.get(AdCorrection, int(supersedes_id))
+        if superseded is None or superseded.post_id != post.id:
+            raise ValueError("supersedes_id does not match this post")
+
+    reason = params.get("reason")
+    if reason is not None:
+        reason = str(reason).strip() or None
+
+    created_by_user_id = params.get("created_by_user_id")
+    transcript_model_call_id = params.get("transcript_model_call_id")
+    if transcript_model_call_id is None:
+        transcript_model_call_id = current_transcript_model_call_id(post.id)
+
+    correction = AdCorrection(
+        post_id=post.id,
+        feed_id=post.feed_id,
+        created_by_user_id=(
+            int(created_by_user_id) if created_by_user_id is not None else None
+        ),
+        kind=kind,
+        label=label,
+        start_time=start_time,
+        end_time=end_time,
+        segment_ids=segment_ids,
+        source_identification_ids=source_identification_ids,
+        reason=reason,
+        example_text=example_text_for_range(start_time, end_time, segments),
+        transcript_model_call_id=(
+            int(transcript_model_call_id)
+            if transcript_model_call_id is not None
+            else None
+        ),
+        stale=False,
+        supersedes_id=int(supersedes_id) if supersedes_id is not None else None,
+        created_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    db.session.add(correction)
+    db.session.flush()
+    return {
+        "id": int(correction.id),
+        "post_id": post.id,
+        "start_time": float(correction.start_time),
+        "end_time": float(correction.end_time),
+    }
+
+
+def apply_ad_corrections_action(params: dict[str, Any]) -> dict[str, Any]:
+    from podcast_processor.ad_corrections import recut_post_audio
+
+    post_id = params.get("post_id")
+    if post_id is None:
+        raise ValueError("post_id is required")
+    post = db.session.get(Post, int(post_id))
+    if post is None:
+        raise ValueError(f"Post {post_id} not found")
+
+    if not params.get("recut", True):
+        return {"post_id": post.id, "recut": False}
+    result = recut_post_audio(post)
+    result["recut"] = True
+    return result
+
+
+def mark_ad_corrections_stale_action(params: dict[str, Any]) -> dict[str, Any]:
+    from podcast_processor.ad_corrections import mark_ad_corrections_stale_for_post
+
+    post_id = params.get("post_id")
+    if post_id is None:
+        raise ValueError("post_id is required")
+    updated = mark_ad_corrections_stale_for_post(int(post_id))
+    return {"post_id": int(post_id), "updated": updated}
