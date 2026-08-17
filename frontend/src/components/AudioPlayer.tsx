@@ -52,8 +52,9 @@ export default function AudioPlayer() {
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
-  const volumeSliderRef = useRef<HTMLDivElement>(null);
+  const volumeControlRef = useRef<HTMLDivElement>(null);
   const volumeTrackRef = useRef<HTMLDivElement>(null);
+  const [isVolumeDragging, setIsVolumeDragging] = useState(false);
 
   // Reset dismissed error when a new error occurs
   useEffect(() => {
@@ -62,15 +63,16 @@ export default function AudioPlayer() {
     }
   }, [error, dismissedError]);
 
-  // Close volume slider when clicking outside
+  // Close volume slider when clicking outside the control (speaker + popup)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      const insidePopup = volumeSliderRef.current?.contains(target);
+      const insideControl = volumeControlRef.current?.contains(target);
       // #region agent log
-      fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:clickOutside',message:'volume popup mousedown',data:{insidePopup,showVolumeSlider},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+      fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:clickOutside',message:'volume popup mousedown',data:{insideControl,showVolumeSlider,isVolumeDragging},timestamp:Date.now(),hypothesisId:'B',runId:'post-fix'})}).catch(()=>{});
       // #endregion
-      if (volumeSliderRef.current && !volumeSliderRef.current.contains(target)) {
+      if (isVolumeDragging) return;
+      if (volumeControlRef.current && !volumeControlRef.current.contains(target)) {
         setShowVolumeSlider(false);
       }
     };
@@ -79,7 +81,32 @@ export default function AudioPlayer() {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [showVolumeSlider]);
+  }, [showVolumeSlider, isVolumeDragging]);
+
+  useEffect(() => {
+    if (!isVolumeDragging) return;
+
+    const handleMove = (event: MouseEvent) => {
+      const trackEl = volumeTrackRef.current;
+      if (!trackEl) return;
+      const trackRect = trackEl.getBoundingClientRect();
+      if (trackRect.width <= 0) return;
+      const newVolume = Math.max(
+        0,
+        Math.min((event.clientX - trackRect.left) / trackRect.width, 1)
+      );
+      setVolume(newVolume);
+    };
+
+    const handleUp = () => setIsVolumeDragging(false);
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+  }, [isVolumeDragging, setVolume]);
 
   // Don't render if no episode is loaded
   if (!currentEpisode) {
@@ -136,19 +163,28 @@ export default function AudioPlayer() {
     }
   };
 
-  const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
+  const volumeFromClientX = (clientX: number) => {
     const trackEl = volumeTrackRef.current;
-    const popupEl = volumeSliderRef.current;
-    if (!popupEl) return;
+    if (!trackEl) return null;
+    const trackRect = trackEl.getBoundingClientRect();
+    if (trackRect.width <= 0) return null;
+    return Math.max(0, Math.min((clientX - trackRect.left) / trackRect.width, 1));
+  };
 
-    const trackRect = trackEl?.getBoundingClientRect();
-    const popupRect = popupEl.getBoundingClientRect();
-    const clickXPopup = e.clientX - popupRect.left;
-    const newVolume = Math.max(0, Math.min(clickXPopup / popupRect.width, 1));
+  const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
+    const newVolume = volumeFromClientX(e.clientX);
+    if (newVolume === null) return;
     // #region agent log
-    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:handleVolumeChange',message:'volume click',data:{newVolume,trackWidth:trackRect?.width,popupWidth:popupRect.width,clickXPopup,currentVolume:volume,usedPopupRect:true},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:handleVolumeChange',message:'volume click',data:{newVolume,trackWidth:volumeTrackRef.current?.getBoundingClientRect().width,currentVolume:volume},timestamp:Date.now(),hypothesisId:'A',runId:'post-fix'})}).catch(()=>{});
     // #endregion
     setVolume(newVolume);
+  };
+
+  const handleVolumeMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsVolumeDragging(true);
+    handleVolumeChange(e);
   };
 
   const toggleMute = () => {
@@ -256,10 +292,17 @@ export default function AudioPlayer() {
           </div>
 
           {/* Volume Control */}
-          <div className="flex items-center space-x-2 relative">
+          <div
+            ref={volumeControlRef}
+            className="relative flex items-center space-x-2"
+            onMouseEnter={() => setShowVolumeSlider(true)}
+            onMouseLeave={() => {
+              if (!isVolumeDragging) setShowVolumeSlider(false);
+            }}
+          >
             <button
+              type="button"
               onClick={toggleMute}
-              onMouseEnter={() => setShowVolumeSlider(true)}
               className="p-1 text-gray-600 hover:text-gray-900 transition-colors"
             >
               {volume === 0 ? (
@@ -268,24 +311,30 @@ export default function AudioPlayer() {
                 <SpeakerWaveIcon className="w-5 h-5" />
               )}
             </button>
-            
+
             {showVolumeSlider && (
               <div
-                ref={volumeSliderRef}
-                className="absolute bottom-full right-0 mb-2 p-2 bg-white border border-gray-200 rounded shadow-lg audio-player-volume-slider"
-                onMouseEnter={() => setShowVolumeSlider(true)}
+                className="absolute bottom-full right-0 mb-1 flex min-h-[2.25rem] min-w-[6.5rem] items-center rounded border border-gray-200 bg-white px-3 py-2 shadow-lg audio-player-volume-slider"
+                onMouseDown={(e) => e.stopPropagation()}
               >
                 <div
                   ref={volumeTrackRef}
-                  className="w-20 h-1 bg-gray-200 rounded-full cursor-pointer relative group"
-                  onClick={handleVolumeChange}
+                  role="slider"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(volume * 100)}
+                  aria-label="Volume"
+                  className="relative h-2 w-24 flex-shrink-0 cursor-pointer rounded-full bg-gray-200"
+                  onMouseDown={handleVolumeMouseDown}
                 >
                   <div
-                    className="h-full bg-gray-900 rounded-full relative"
+                    className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-blue-600"
                     style={{ width: `${volume * 100}%` }}
-                  >
-                    <div className="absolute right-0 top-1/2 transform -translate-y-1/2 w-3 h-3 bg-gray-900 rounded-full opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
+                  />
+                  <div
+                    className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-blue-600"
+                    style={{ left: `calc(${volume * 100}% - 6px)` }}
+                  />
                 </div>
               </div>
             )}
