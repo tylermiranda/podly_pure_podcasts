@@ -171,17 +171,11 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
   const setVolume = useCallback((volume: number) => {
     const clamped = Math.max(0, Math.min(volume, 1));
     const audio = audioRef.current;
-    // #region agent log
-    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume',message:'setVolume called',data:{volume:clamped,hasAudio:!!audio,audioVolumeBefore:audio?.volume},timestamp:Date.now(),hypothesisId:'C',runId:'post-fix'})}).catch(()=>{});
-    // #endregion
     persistVolume(clamped);
     if (audio) {
       audio.volume = clamped;
     }
     dispatch({ type: 'SET_VOLUME', payload: clamped });
-    // #region agent log
-    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume:after',message:'setVolume applied',data:{volume:clamped,audioVolumeAfter:audio?.volume,persisted:clamped},timestamp:Date.now(),hypothesisId:'C',runId:'post-fix'})}).catch(()=>{});
-    // #endregion
   }, []);
 
   useEffect(() => {

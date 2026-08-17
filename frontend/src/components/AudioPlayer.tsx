@@ -74,10 +74,6 @@ export default function AudioPlayer() {
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      const insideControl = volumeControlRef.current?.contains(target);
-      // #region agent log
-      fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:clickOutside',message:'volume popup mousedown',data:{insideControl,showVolumeSlider,isVolumeDragging},timestamp:Date.now(),hypothesisId:'B',runId:'post-fix'})}).catch(()=>{});
-      // #endregion
       if (isVolumeDragging) return;
       if (volumeControlRef.current && !volumeControlRef.current.contains(target)) {
         setShowVolumeSlider(false);
@@ -184,9 +180,6 @@ export default function AudioPlayer() {
   const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
     const newVolume = volumeFromClientY(e.clientY);
     if (newVolume === null) return;
-    // #region agent log
-    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:handleVolumeChange',message:'volume click',data:{newVolume,trackHeight:volumeTrackRef.current?.getBoundingClientRect().height,currentVolume:volume,orientation:'vertical'},timestamp:Date.now(),hypothesisId:'A',runId:'post-fix'})}).catch(()=>{});
-    // #endregion
     setVolume(newVolume);
   };
 
