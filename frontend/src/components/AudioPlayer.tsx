@@ -53,6 +53,7 @@ export default function AudioPlayer() {
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
   const volumeSliderRef = useRef<HTMLDivElement>(null);
+  const volumeTrackRef = useRef<HTMLDivElement>(null);
 
   // Reset dismissed error when a new error occurs
   useEffect(() => {
@@ -64,7 +65,12 @@ export default function AudioPlayer() {
   // Close volume slider when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (volumeSliderRef.current && !volumeSliderRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const insidePopup = volumeSliderRef.current?.contains(target);
+      // #region agent log
+      fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:clickOutside',message:'volume popup mousedown',data:{insidePopup,showVolumeSlider},timestamp:Date.now(),hypothesisId:'B'})}).catch(()=>{});
+      // #endregion
+      if (volumeSliderRef.current && !volumeSliderRef.current.contains(target)) {
         setShowVolumeSlider(false);
       }
     };
@@ -131,11 +137,17 @@ export default function AudioPlayer() {
   };
 
   const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!volumeSliderRef.current) return;
-    
-    const rect = volumeSliderRef.current.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const newVolume = Math.max(0, Math.min(clickX / rect.width, 1));
+    const trackEl = volumeTrackRef.current;
+    const popupEl = volumeSliderRef.current;
+    if (!popupEl) return;
+
+    const trackRect = trackEl?.getBoundingClientRect();
+    const popupRect = popupEl.getBoundingClientRect();
+    const clickXPopup = e.clientX - popupRect.left;
+    const newVolume = Math.max(0, Math.min(clickXPopup / popupRect.width, 1));
+    // #region agent log
+    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:handleVolumeChange',message:'volume click',data:{newVolume,trackWidth:trackRect?.width,popupWidth:popupRect.width,clickXPopup,currentVolume:volume,usedPopupRect:true},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     setVolume(newVolume);
   };
 
@@ -264,6 +276,7 @@ export default function AudioPlayer() {
                 onMouseEnter={() => setShowVolumeSlider(true)}
               >
                 <div
+                  ref={volumeTrackRef}
                   className="w-20 h-1 bg-gray-200 rounded-full cursor-pointer relative group"
                   onClick={handleVolumeChange}
                 >

@@ -146,9 +146,16 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const setVolume = useCallback((volume: number) => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
+    const audio = audioRef.current;
+    // #region agent log
+    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume',message:'setVolume called',data:{volume,hasAudio:!!audio,audioVolumeBefore:audio?.volume},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    if (audio) {
+      audio.volume = volume;
       dispatch({ type: 'SET_VOLUME', payload: volume });
+      // #region agent log
+      fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume:after',message:'setVolume applied',data:{volume,audioVolumeAfter:audio.volume},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
     }
   }, []);
 
