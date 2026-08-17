@@ -304,8 +304,8 @@ def _configure_session(app: Flask, auth_settings: AuthSettings) -> None:
 
 def _configure_cors(app: Flask) -> None:
     default_cors = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
     ]
     cors_origins_env = os.environ.get("CORS_ORIGINS")
     if cors_origins_env:

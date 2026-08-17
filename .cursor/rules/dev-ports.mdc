@@ -1,0 +1,12 @@
+---
+description: Local development ports for podly_pure_podcasts
+alwaysApply: true
+---
+
+# Local dev ports (podly_pure_podcasts)
+
+- **Frontend (Vite):** always use port **5174** — `http://127.0.0.1:5174` (not 5173; that is other projects).
+- **Backend (Flask):** port **5001**
+- **Writer (IPC):** port **50001**
+
+Start frontend: `cd frontend && npm run dev` (Vite is configured for 5174 in `vite.config.ts`).

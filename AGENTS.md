@@ -45,7 +45,7 @@ Use tmux for long-running processes. Optional: `PODLY_DISABLE_SCHEDULER=1` reduc
 
 ### Frontend dev server
 
-`cd frontend && npm run dev` → Vite on `:5173`, proxies API to `http://localhost:5001` (`BACKEND_TARGET` in `vite.config.ts`). Production UI is built with `npm run build` into Flask static assets (Docker image does this automatically).
+`cd frontend && npm run dev` → Vite on `:5174`, proxies API to `http://localhost:5001` (`BACKEND_TARGET` in `vite.config.ts`). Production UI is built with `npm run build` into Flask static assets (Docker image does this automatically).
 
 ### Secrets
 
