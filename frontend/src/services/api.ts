@@ -443,14 +443,18 @@ export const feedsApi = {
     correction: { id: number; post_id: number; start_time: number; end_time: number };
     apply: { post_id: number; recut?: boolean } | null;
   }> => {
-    const response = await api.post(`/api/posts/${guid}/ad-corrections`, payload);
+    const response = await api.post(`/api/posts/${guid}/ad-corrections`, payload, {
+      timeout: 600_000,
+    });
     return response.data;
   },
 
   applyAdCorrections: async (
     guid: string
   ): Promise<{ post_id: number; recut?: boolean; processed_audio_path?: string }> => {
-    const response = await api.post(`/api/posts/${guid}/ad-corrections/apply`);
+    const response = await api.post(`/api/posts/${guid}/ad-corrections/apply`, undefined, {
+      timeout: 600_000,
+    });
     return response.data;
   },
 

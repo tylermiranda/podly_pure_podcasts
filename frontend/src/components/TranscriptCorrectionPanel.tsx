@@ -107,6 +107,7 @@ export default function TranscriptCorrectionPanel({
   const [kind, setKind] = useState<CorrectionKind>('missed_ad');
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
   const selectedIndexes = useMemo(() => {
@@ -183,21 +184,25 @@ export default function TranscriptCorrectionPanel({
     },
     onSuccess: async () => {
       setError(null);
+      setStatus('Correction saved and processed audio recut.');
       await refreshStats();
     },
     onError: async (err: unknown) => {
+      setStatus(null);
       setError(getHttpErrorInfo(err).message);
       await refreshStats();
     },
   });
 
-  const retryRecutMutation = useMutation({
+  const recutMutation = useMutation({
     mutationFn: () => feedsApi.applyAdCorrections(episodeGuid),
     onSuccess: async () => {
       setError(null);
+      setStatus('Processed audio recut from current corrections.');
       await refreshStats();
     },
     onError: (err: unknown) => {
+      setStatus(null);
       setError(getHttpErrorInfo(err).message);
     },
   });
@@ -250,7 +255,8 @@ export default function TranscriptCorrectionPanel({
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-left">
             <p className="text-sm text-indigo-900 mb-3">
               Drag across rows or edit start/end seconds, then mark the span as ad or content.
-              Effective cuts are highlighted in red.
+              That saves the correction and recuts the processed MP3 from the original audio.
+              You do not need Reprocess (that re-runs Whisper/LLM). Effective cuts are highlighted in red.
             </p>
             <div className="flex flex-wrap items-end gap-3">
               <label className="text-xs text-gray-700">
@@ -299,32 +305,48 @@ export default function TranscriptCorrectionPanel({
                 type="button"
                 onClick={() => {
                   setKind('missed_ad');
+                  setStatus('Saving correction and recutting…');
                   saveMutation.mutate('ad');
                 }}
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
-                Mark ad
+                {saveMutation.isPending ? 'Recutting…' : 'Mark ad'}
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setKind(kind === 'missed_ad' ? 'false_positive' : kind);
+                  setStatus('Saving correction and recutting…');
                   saveMutation.mutate('content');
                 }}
-                disabled={saveMutation.isPending}
+                disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
-                Mark content
+                {saveMutation.isPending ? 'Recutting…' : 'Mark content'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStatus('Recutting processed audio…');
+                  recutMutation.mutate();
+                }}
+                disabled={
+                  saveMutation.isPending || recutMutation.isPending || corrections.length === 0
+                }
+                className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+              >
+                {recutMutation.isPending ? 'Recutting…' : 'Recut audio'}
               </button>
             </div>
+            {status && <p className="mt-2 text-sm text-indigo-800">{status}</p>}
             {error && (
               <div className="mt-2 flex flex-wrap items-center gap-3">
                 <p className="text-sm text-red-700">{error}</p>
                 <button
                   type="button"
-                  onClick={() => retryRecutMutation.mutate()}
-                  disabled={retryRecutMutation.isPending}
+                  onClick={() => recutMutation.mutate()}
+                  disabled={recutMutation.isPending}
                   className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                 >
                   Retry recut
