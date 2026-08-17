@@ -53,6 +53,29 @@ interface TranscriptCorrectionPanelProps {
 
 const CLICK_PIXEL_THRESHOLD = 6;
 
+function contiguousIndexGroups(indexes: Set<number>): number[][] {
+  if (indexes.size === 0) return [];
+  const sorted = [...indexes].sort((a, b) => a - b);
+  const groups: number[][] = [];
+  let current: number[] = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] === sorted[i - 1] + 1) {
+      current.push(sorted[i]);
+    } else {
+      groups.push(current);
+      current = [sorted[i]];
+    }
+  }
+  groups.push(current);
+  return groups;
+}
+
+function rangeIndexes(from: number, to: number): Set<number> {
+  const start = Math.min(from, to);
+  const end = Math.max(from, to);
+  return new Set(Array.from({ length: end - start + 1 }, (_, i) => start + i));
+}
+
 function overlaps(start: number, end: number, block: AdBlock): boolean {
   return start < block.end_time && end > block.start_time;
 }
@@ -99,9 +122,14 @@ export default function TranscriptCorrectionPanel({
   const queryClient = useQueryClient();
   const { audioRef: globalAudioRef, reloadProcessedAudio } = useAudioPlayer();
   const originalAudioRef = useRef<HTMLAudioElement>(null);
-  const pointerStart = useRef<{ x: number; y: number; index: number } | null>(null);
-  const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const pointerStart = useRef<{
+    x: number;
+    y: number;
+    index: number;
+    skipPlay?: boolean;
+  } | null>(null);
+  const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
+  const [rangeAnchor, setRangeAnchor] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -111,22 +139,32 @@ export default function TranscriptCorrectionPanel({
   const [status, setStatus] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
-  const selectedIndexes = useMemo(() => {
-    if (anchorIndex === null) return new Set<number>();
-    const other = hoverIndex ?? anchorIndex;
-    const from = Math.min(anchorIndex, other);
-    const to = Math.max(anchorIndex, other);
-    return new Set(Array.from({ length: to - from + 1 }, (_, i) => from + i));
-  }, [anchorIndex, hoverIndex]);
+  const selectionGroups = useMemo(
+    () => contiguousIndexGroups(selectedIndexes),
+    [selectedIndexes]
+  );
 
-  const selectedSegments = segments.filter((_, index) => selectedIndexes.has(index));
+  const selectionSummary =
+    selectedIndexes.size > 0
+      ? `${selectionGroups.length} span${selectionGroups.length === 1 ? '' : 's'} · ${selectedIndexes.size} segment${selectedIndexes.size === 1 ? '' : 's'} selected`
+      : null;
 
-  const applySelectionBounds = (rows: TranscriptSegmentRow[]) => {
+  const applySelectionBounds = useCallback((rows: TranscriptSegmentRow[]) => {
     if (!rows.length) return;
     const snapped = snapToWords(rows[0].start_time, rows[rows.length - 1].end_time, rows);
     setStartTime(snapped.start.toFixed(1));
     setEndTime(snapped.end.toFixed(1));
-  };
+  }, []);
+
+  const updateBoundsFromSelection = useCallback(
+    (indexes: Set<number>) => {
+      const groups = contiguousIndexGroups(indexes);
+      if (groups.length !== 1) return;
+      const rows = groups[0].map((index) => segments[index]);
+      applySelectionBounds(rows);
+    },
+    [applySelectionBounds, segments]
+  );
 
   const pauseGlobalPlayer = useCallback(() => {
     const globalAudio = globalAudioRef.current;
@@ -153,7 +191,7 @@ export default function TranscriptCorrectionPanel({
       pointerStart.current = null;
       setDragging(false);
       const dist = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-      if (dist < CLICK_PIXEL_THRESHOLD) {
+      if (dist < CLICK_PIXEL_THRESHOLD && !start.skipPlay) {
         const segment = segments[start.index];
         if (segment) playFrom(segment.start_time);
       }
@@ -179,26 +217,59 @@ export default function TranscriptCorrectionPanel({
   };
 
   const saveMutation = useMutation({
-    mutationFn: async (label: 'ad' | 'content') => {
+    mutationFn: async ({
+      label,
+      correctionKind,
+    }: {
+      label: 'ad' | 'content';
+      correctionKind: CorrectionKind;
+    }) => {
+      const groups = contiguousIndexGroups(selectedIndexes);
+      if (groups.length > 0) {
+        await Promise.all(
+          groups.map((group) => {
+            const rows = group.map((index) => segments[index]);
+            const snapped = snapToWords(
+              rows[0].start_time,
+              rows[rows.length - 1].end_time,
+              segments
+            );
+            return feedsApi.createAdCorrection(episodeGuid, {
+              label,
+              kind: correctionKind,
+              start_time: snapped.start,
+              end_time: snapped.end,
+              segment_ids: rows.map((segment) => segment.id),
+              reason: reason.trim() || undefined,
+              apply: false,
+            });
+          })
+        );
+        return { count: groups.length };
+      }
+
       const start = Number(startTime);
       const end = Number(endTime);
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-        throw new Error('Select a start and end time.');
+        throw new Error('Select segment rows or enter a start and end time.');
       }
-      return feedsApi.createAdCorrection(episodeGuid, {
+      await feedsApi.createAdCorrection(episodeGuid, {
         label,
-        kind,
+        kind: correctionKind,
         start_time: start,
         end_time: end,
-        segment_ids: selectedSegments.map((segment) => segment.id),
         reason: reason.trim() || undefined,
         apply: false,
       });
+      return { count: 1 };
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
+      const count = result.count;
       setError(null);
-      setStatus('Correction saved — recut when you are done marking spans.');
-      toast.success('Correction saved');
+      setStatus(
+        `${count} correction${count === 1 ? '' : 's'} saved — recut when you are done marking spans.`
+      );
+      toast.success(`Saved ${count} correction${count === 1 ? '' : 's'}`);
       await refreshStatsOnly();
     },
     onError: async (err: unknown) => {
@@ -249,7 +320,8 @@ export default function TranscriptCorrectionPanel({
         {originalAudioUrl ? (
           <div className="text-left">
             <p className="mb-2 text-sm text-gray-600">
-              Original audio (with ads). Click a row to play from that timestamp; drag to select a span.
+              Original audio (with ads). Click a row to play; drag or Shift+click for a range;
+              Cmd/Ctrl+click to select multiple rows.
             </p>
             <audio
               ref={originalAudioRef}
@@ -269,11 +341,15 @@ export default function TranscriptCorrectionPanel({
         {canEdit && (
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-left">
             <p className="text-sm text-indigo-900 mb-3">
-              Drag across rows or edit start/end seconds, then mark spans as ad or content while
-              listening to the original audio. Mark ad/content saves each correction; click Recut
-              audio once when finished to update the processed MP3. You do not need Reprocess
-              (that re-runs Whisper/LLM). Effective cuts are highlighted in red.
+              Select rows (drag, Shift+click, or Cmd/Ctrl+click for multiple spans), or edit
+              start/end seconds manually, then mark as ad or content while listening to the
+              original audio. Mark ad/content saves each span; click Recut audio once when
+              finished to update the processed MP3. You do not need Reprocess (that re-runs
+              Whisper/LLM). Effective cuts are highlighted in red.
             </p>
+            {selectionSummary && (
+              <p className="text-sm font-medium text-indigo-800 mb-3">{selectionSummary}</p>
+            )}
             {corrections.length > 0 && (
               <p className="text-sm text-indigo-800 mb-3">
                 {corrections.length} correction{corrections.length === 1 ? '' : 's'} saved — click
@@ -328,7 +404,7 @@ export default function TranscriptCorrectionPanel({
                 onClick={() => {
                   setKind('missed_ad');
                   setStatus('Saving correction…');
-                  saveMutation.mutate('ad');
+                  saveMutation.mutate({ label: 'ad', correctionKind: 'missed_ad' });
                 }}
                 disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
@@ -338,9 +414,10 @@ export default function TranscriptCorrectionPanel({
               <button
                 type="button"
                 onClick={() => {
-                  setKind(kind === 'missed_ad' ? 'false_positive' : kind);
+                  const correctionKind = kind === 'missed_ad' ? 'false_positive' : kind;
+                  setKind(correctionKind);
                   setStatus('Saving correction…');
-                  saveMutation.mutate('content');
+                  saveMutation.mutate({ label: 'content', correctionKind });
                 }}
                 disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
@@ -436,22 +513,54 @@ export default function TranscriptCorrectionPanel({
                                 : ''
                       } cursor-pointer hover:bg-gray-50`}
                       onMouseDown={(event) => {
+                        const toggleModifier = event.metaKey || event.ctrlKey;
+                        const rangeModifier = event.shiftKey;
                         pointerStart.current = {
                           x: event.clientX,
                           y: event.clientY,
                           index,
+                          skipPlay: toggleModifier || rangeModifier,
                         };
                         if (!canEdit) return;
+                        event.preventDefault();
+
+                        if (toggleModifier) {
+                          setDragging(false);
+                          setRangeAnchor(index);
+                          setSelectedIndexes((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(index)) next.delete(index);
+                            else next.add(index);
+                            updateBoundsFromSelection(next);
+                            return next;
+                          });
+                          return;
+                        }
+
+                        if (rangeModifier) {
+                          setDragging(false);
+                          const anchor = rangeAnchor ?? index;
+                          setRangeAnchor(anchor);
+                          setSelectedIndexes((prev) => {
+                            const next = new Set([...prev, ...rangeIndexes(anchor, index)]);
+                            updateBoundsFromSelection(next);
+                            return next;
+                          });
+                          return;
+                        }
+
                         setDragging(true);
-                        setAnchorIndex(index);
-                        setHoverIndex(index);
+                        setRangeAnchor(index);
+                        const next = new Set([index]);
+                        setSelectedIndexes(next);
                         applySelectionBounds([segment]);
                       }}
                       onMouseEnter={() => {
-                        if (!canEdit || !dragging || anchorIndex === null) return;
-                        setHoverIndex(index);
-                        const from = Math.min(anchorIndex, index);
-                        const to = Math.max(anchorIndex, index);
+                        if (!canEdit || !dragging || rangeAnchor === null) return;
+                        const next = rangeIndexes(rangeAnchor, index);
+                        setSelectedIndexes(next);
+                        const from = Math.min(rangeAnchor, index);
+                        const to = Math.max(rangeAnchor, index);
                         applySelectionBounds(segments.slice(from, to + 1));
                       }}
                     >
