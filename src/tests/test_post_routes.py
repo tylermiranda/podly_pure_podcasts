@@ -109,6 +109,48 @@ def test_audio_endpoint_supports_range_requests(app, tmp_path):
     assert "attachment" not in response.headers.get("Content-Disposition", "").lower()
 
 
+def test_original_audio_endpoint_supports_range_requests(app, tmp_path):
+    app.testing = True
+    app.register_blueprint(post_bp)
+
+    with app.app_context():
+        feed = Feed(title="Test Feed", rss_url="https://example.com/feed.xml")
+        db.session.add(feed)
+        db.session.commit()
+
+        original_audio = tmp_path / "original.mp3"
+        original_audio.write_bytes(b"original audio")
+
+        post = Post(
+            feed_id=feed.id,
+            guid="orig-stream-guid",
+            download_url="https://example.com/audio.mp3",
+            title="Original Stream Episode",
+            unprocessed_audio_path=str(original_audio),
+            whitelisted=True,
+        )
+        db.session.add(post)
+        db.session.commit()
+        post_guid = post.guid
+
+    client = app.test_client()
+    response = client.get(
+        f"/api/posts/{post_guid}/audio/original",
+        headers={"Range": "bytes=0-7"},
+    )
+
+    assert response.status_code == 206
+    assert response.data == b"original"
+    assert response.headers["Accept-Ranges"] == "bytes"
+    assert "attachment" not in response.headers.get("Content-Disposition", "").lower()
+
+    stream_response = client.get(f"/api/posts/{post_guid}/audio/original")
+    assert stream_response.status_code == 200
+    with app.app_context():
+        post = Post.query.filter_by(guid=post_guid).one()
+        assert post.download_count in (None, 0)
+
+
 def test_audio_triggers_processing_when_enabled(app):
     """Start processing when streamed audio is missing and toggle is enabled."""
     app.testing = True

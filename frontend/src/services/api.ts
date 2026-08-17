@@ -224,6 +224,10 @@ export const feedsApi = {
     return buildAbsoluteUrl(`/api/posts/${guid}/audio`);
   },
 
+  getPostOriginalAudioUrl: (guid: string): string => {
+    return buildAbsoluteUrl(`/api/posts/${guid}/audio/original`);
+  },
+
   // Get download URL for processed post
   getPostDownloadUrl: (guid: string): string => {
     return buildAbsoluteUrl(`/api/posts/${guid}/download`);
@@ -285,6 +289,7 @@ export const feedsApi = {
       release_date: string | null;
       whitelisted: boolean;
       has_processed_audio: boolean;
+      has_unprocessed_audio?: boolean;
     };
     ad_detection_strategy: 'llm' | 'chapter' | 'chapter_insert';
     processing_stats: {

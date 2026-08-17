@@ -451,20 +451,14 @@ def insert_ad_correction_action(params: dict[str, Any]) -> dict[str, Any]:
 
 
 def apply_ad_corrections_action(params: dict[str, Any]) -> dict[str, Any]:
-    from podcast_processor.ad_corrections import recut_post_audio
-
+    """Validate the post for recut. Audio recut runs in the Flask request, not here."""
     post_id = params.get("post_id")
     if post_id is None:
         raise ValueError("post_id is required")
     post = db.session.get(Post, int(post_id))
     if post is None:
         raise ValueError(f"Post {post_id} not found")
-
-    if not params.get("recut", True):
-        return {"post_id": post.id, "recut": False}
-    result = recut_post_audio(post)
-    result["recut"] = True
-    return result
+    return {"post_id": post.id, "recut": False}
 
 
 def mark_ad_corrections_stale_action(params: dict[str, Any]) -> dict[str, Any]:

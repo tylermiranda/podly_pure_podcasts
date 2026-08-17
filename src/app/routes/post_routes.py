@@ -592,6 +592,10 @@ def api_post_stats(p_guid: str) -> flask.Response:
             ),
             "whitelisted": post.whitelisted,
             "has_processed_audio": post.processed_audio_path is not None,
+            "has_unprocessed_audio": bool(
+                post.unprocessed_audio_path
+                and Path(post.unprocessed_audio_path).is_file()
+            ),
             "download_count": post.download_count,
         },
         "ad_detection_strategy": ad_detection_strategy,
@@ -705,24 +709,12 @@ def api_create_ad_correction(p_guid: str) -> ResponseReturnValue:
     apply_now = payload.get("apply", True)
     apply_data: dict[str, Any] | None = None
     if apply_now:
-        apply_result = writer_client.action(
-            "apply_ad_corrections",
-            {"post_id": post.id, "recut": True},
-            wait=True,
-        )
-        if not apply_result or not apply_result.success:
+        apply_data, recut_error = _recut_post_in_request(post)
+        if recut_error:
             return flask.make_response(
-                flask.jsonify(
-                    {
-                        "error": getattr(
-                            apply_result, "error", "Failed to recut episode"
-                        ),
-                        "correction": result.data,
-                    }
-                ),
+                flask.jsonify({"error": recut_error, "correction": result.data}),
                 500,
             )
-        apply_data = apply_result.data if isinstance(apply_result.data, dict) else None
 
     return flask.jsonify({"correction": result.data, "apply": apply_data})
 
@@ -738,17 +730,10 @@ def api_apply_ad_corrections(p_guid: str) -> ResponseReturnValue:
     if error:
         return error
 
-    result = writer_client.action(
-        "apply_ad_corrections",
-        {"post_id": post.id, "recut": True},
-        wait=True,
-    )
-    if not result or not result.success:
-        return flask.make_response(
-            flask.jsonify({"error": getattr(result, "error", "Failed to recut")}),
-            500,
-        )
-    return flask.jsonify(result.data if isinstance(result.data, dict) else {})
+    apply_data, recut_error = _recut_post_in_request(post)
+    if recut_error:
+        return flask.make_response(flask.jsonify({"error": recut_error}), 500)
+    return flask.jsonify(apply_data or {})
 
 
 @post_bp.route("/api/posts/<string:p_guid>/whitelist", methods=["POST"])
@@ -1278,6 +1263,22 @@ def api_post_status(p_guid: str) -> ResponseReturnValue:
     return flask.jsonify(result), status_code
 
 
+def _recut_post_in_request(post: Post) -> tuple[dict[str, Any] | None, str | None]:
+    """Recut processed audio in the web process so writer IPC is not nested."""
+    from podcast_processor.ad_corrections import recut_post_audio
+
+    db.session.expire(post)
+    try:
+        apply_data = recut_post_audio(post)
+    except Exception as exc:
+        logger.exception("Failed to recut post %s after ad correction", post.guid)
+        return None, str(exc) or "Failed to recut episode"
+    if not isinstance(apply_data, dict):
+        apply_data = {}
+    apply_data["recut"] = True
+    return apply_data, None
+
+
 @post_bp.route("/api/posts/<string:p_guid>/audio", methods=["GET"])
 def api_get_post_audio(p_guid: str) -> ResponseReturnValue:
     """API endpoint to serve processed audio files with proper CORS headers."""
@@ -1315,6 +1316,55 @@ def api_get_post_audio(p_guid: str) -> ResponseReturnValue:
         return flask.make_response(
             jsonify(
                 {"error": "Error serving audio file", "error_code": "SERVER_ERROR"}
+            ),
+            500,
+        )
+
+
+@post_bp.route("/api/posts/<string:p_guid>/audio/original", methods=["GET"])
+def api_get_post_original_audio(p_guid: str) -> ResponseReturnValue:
+    """Stream original (unprocessed) audio for in-app playback with range support."""
+    current_user = getattr(g, "current_user", None)
+    if current_user:
+        update_user_last_active(current_user.id)
+
+    logger.info("API request for original audio file with GUID: %s", p_guid)
+
+    post = Post.query.filter_by(guid=p_guid).first()
+    if post is None:
+        logger.warning("Post with GUID: %s not found", p_guid)
+        return flask.make_response(
+            jsonify({"error": "Post not found", "error_code": "NOT_FOUND"}), 404
+        )
+
+    if not post.whitelisted:
+        logger.warning("Post: %s is not whitelisted", post.title)
+        return flask.make_response(("Post not whitelisted", 403))
+
+    if (
+        not post.unprocessed_audio_path
+        or not Path(post.unprocessed_audio_path).is_file()
+    ):
+        logger.warning("Original audio not found for post: %s", post.id)
+        return flask.make_response(("Original audio not found", 404))
+
+    try:
+        response = send_file(
+            path_or_file=Path(post.unprocessed_audio_path).resolve(),
+            mimetype="audio/mpeg",
+            as_attachment=False,
+            conditional=True,
+        )
+        response.headers["Accept-Ranges"] = "bytes"
+        return response
+    except Exception as e:  # noqa: BLE001
+        logger.error("Error serving original audio file for %s: %s", p_guid, e)
+        return flask.make_response(
+            jsonify(
+                {
+                    "error": "Error serving original audio file",
+                    "error_code": "SERVER_ERROR",
+                }
             ),
             500,
         )

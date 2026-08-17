@@ -89,7 +89,7 @@ export default function LLMProcessingStats({
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-6 border-b">
               <h2 className="text-xl font-bold text-gray-900 text-left">Processing Statistics & Debug</h2>
               <button
@@ -128,7 +128,8 @@ export default function LLMProcessingStats({
               </nav>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+            {(isLoading || error || !stats || activeTab !== 'transcript') && (
+            <div className="p-6 overflow-y-auto flex-1 min-h-0">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -138,7 +139,7 @@ export default function LLMProcessingStats({
                 <div className="text-center py-12">
                   <p className="text-red-600">Failed to load processing statistics</p>
                 </div>
-              ) : stats ? (
+              ) : stats && activeTab !== 'transcript' ? (
                 <>
                   {activeTab === 'overview' && (
                     <div className="space-y-6">
@@ -511,19 +512,6 @@ export default function LLMProcessingStats({
                     </div>
                   )}
 
-                  {activeTab === 'transcript' && (
-                    <TranscriptCorrectionPanel
-                      episodeGuid={episodeGuid}
-                      feedId={stats.post?.feed_id ?? 0}
-                      canEdit={canEditCorrections}
-                      segments={stats.transcript_segments || []}
-                      adBlocks={stats.processing_stats?.ad_blocks || []}
-                      corrections={stats.corrections || []}
-                      suggestedPromptSnippet={stats.suggested_prompt_snippet || null}
-                      existingPrompt={stats.custom_llm_ad_prompt || null}
-                    />
-                  )}
-
                   {activeTab === 'identifications' && (
                     <div>
                       <h3 className="font-semibold text-gray-900 mb-4 text-left">Identifications ({stats.identifications?.length || 0})</h3>
@@ -582,6 +570,20 @@ export default function LLMProcessingStats({
                 </>
               ) : null}
             </div>
+            )}
+            {stats && !isLoading && !error && activeTab === 'transcript' && (
+              <TranscriptCorrectionPanel
+                episodeGuid={episodeGuid}
+                feedId={stats.post?.feed_id ?? 0}
+                canEdit={canEditCorrections}
+                hasUnprocessedAudio={Boolean(stats.post?.has_unprocessed_audio)}
+                segments={stats.transcript_segments || []}
+                adBlocks={stats.processing_stats?.ad_blocks || []}
+                corrections={stats.corrections || []}
+                suggestedPromptSnippet={stats.suggested_prompt_snippet || null}
+                existingPrompt={stats.custom_llm_ad_prompt || null}
+              />
+            )}
           </div>
         </div>
       )}

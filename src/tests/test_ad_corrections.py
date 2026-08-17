@@ -128,6 +128,7 @@ def test_insert_ad_correction_and_stats_payload(app) -> None:
         payload = response.get_json()
         assert payload["corrections"]
         assert payload["corrections"][0]["label"] == "content"
+        assert payload["post"]["has_unprocessed_audio"] is False
         blocks = payload["processing_stats"]["ad_blocks"]
         assert blocks
         assert blocks[0]["start_time"] == 0.0
@@ -171,6 +172,54 @@ def test_save_correction_route_recuts(app) -> None:
     payload = response.get_json()
     assert payload["correction"]["id"]
     assert payload["apply"]["recut"] is True
+    with app.app_context():
+        assert (
+            AdCorrection.query.filter_by(
+                post_id=payload["correction"]["post_id"]
+            ).count()
+            == 1
+        )
+
+
+def test_save_correction_route_persists_when_recut_fails(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-fail-guid",
+            rss_url="https://example.com/corr-fail.xml",
+        )
+        segment = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=1.0,
+            end_time=8.0,
+            text="head to example.com for details",
+        )
+        db.session.add(segment)
+        db.session.commit()
+        guid = post.guid
+
+    client = app.test_client()
+    with mock.patch(
+        "podcast_processor.ad_corrections.recut_post_audio",
+        side_effect=ValueError("Could not locate or download source audio for recut"),
+    ):
+        response = client.post(
+            f"/api/posts/{guid}/ad-corrections",
+            json={
+                "label": "ad",
+                "kind": "missed_ad",
+                "start_time": 1.0,
+                "end_time": 8.0,
+                "apply": True,
+            },
+        )
+    assert response.status_code == 500
+    payload = response.get_json()
+    assert "Could not locate or download source audio" in payload["error"]
+    assert payload["correction"]["id"]
     with app.app_context():
         assert (
             AdCorrection.query.filter_by(
