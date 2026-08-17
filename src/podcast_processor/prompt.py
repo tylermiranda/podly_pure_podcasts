@@ -127,12 +127,13 @@ DURATION AND CUE GUIDANCE:
 - Ads are typically 15–120 seconds and contain CTAs, URLs/domains, promo/discount codes, phone numbers, or phrases like "brought to you by".
 - Integrated ads can be longer but maintain sales intent; continuous mention of the same sponsor for >3 minutes without CTAs is likely educational/self_promo.
 - Pre-roll/mid-roll/post-roll intros ("a word from our sponsor") and quick outros ("back to the show") belong to the ad block.
+- Do not emit only the URL/CTA sentence. Each window must cover the full sponsor read: the first sales/setup line through the CTA, legal disclaimer, and "back to the show" bumper.
 
 DECISION RULES:
-1) Continuous ads: once an ad starts, follow it to its natural conclusion; include 1–5 second transitions.
+1) Continuous ads: once an ad starts, follow it to its natural conclusion; include 1–5 second transitions. If a later line has a URL, pull in the preceding pitch for that same sponsor.
 2) Strong cues: treat URLs/domains, promo/discount language, and phone numbers as strong sponsor indicators.
 3) Self-promotion guardrail: host promoting their own products/platforms → classify as educational/self_promo with lower confidence unless explicit external sponsorship language is present.
-4) Boundary bias: if later segments clearly form an ad for a sponsor, pull in the prior two intro/transition lines as ad content.
+4) Boundary bias: if later segments clearly form an ad for a sponsor, pull in the prior intro/transition lines as ad content — not just the last two, the whole read.
 5) Prefer labeling as content unless multiple strong ad cues appear with clear external branding.
 
 This transcript excerpt is broken into segments starting with a timestamp [X] (seconds). Output every segment that is advertisement content.

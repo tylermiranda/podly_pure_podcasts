@@ -7,6 +7,7 @@ from app.writer.client import writer_client
 from podcast_processor.ad_merger import AdMerger
 from podcast_processor.ad_spans import (
     AD_MERGE_PROXIMITY_SECONDS,
+    expand_cut_windows,
     identification_cut_window,
 )
 from podcast_processor.audio import clip_segments_with_fade, get_audio_duration_ms
@@ -143,7 +144,34 @@ class AudioProcessor:
         # Convert to time tuples for merge_ad_segments()
         ad_segments_times = [(g.start_time, g.end_time) for g in ad_groups]
         ad_segments_times.sort(key=lambda x: x[0])
-        return ad_segments_times
+        transcript_segments = self._transcript_segments_for_post(
+            post, fallback=ad_segments_with_text
+        )
+        expanded = expand_cut_windows(ad_segments_times, transcript_segments)
+        if expanded != ad_segments_times:
+            self.logger.info(
+                "Expanded %s ad windows to %s full-read windows for post %s",
+                len(ad_segments_times),
+                len(expanded),
+                post.id,
+            )
+        return expanded
+
+    def _transcript_segments_for_post(
+        self, post: Post, *, fallback: list[TranscriptSegment]
+    ) -> list[TranscriptSegment]:
+        if self._identification_query_provided:
+            return fallback
+        try:
+            rows = (
+                self.db_session.query(TranscriptSegment)
+                .filter(TranscriptSegment.post_id == post.id)
+                .order_by(TranscriptSegment.sequence_num)
+                .all()
+            )
+        except Exception:  # noqa: BLE001
+            return fallback
+        return rows or fallback
 
     def _apply_refined_boundaries(self, post: Post, ad_groups: Any) -> None:
         post_row = self._safe_get_post_row(post)
