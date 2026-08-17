@@ -484,6 +484,7 @@ def api_post_stats(p_guid: str) -> flask.Response:
                 "start_time": round(segment.start_time, 1),
                 "end_time": round(segment.end_time, 1),
                 "text": segment.text,
+                "words": segment.words,
                 "primary_label": primary_label,
                 "mixed": mixed,
                 "identifications": [

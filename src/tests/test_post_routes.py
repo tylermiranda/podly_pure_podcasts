@@ -655,6 +655,19 @@ def test_post_stats_omits_debug_info_when_disabled(app):
         )
         db.session.add(post)
         db.session.commit()
+        segment = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=0.0,
+            end_time=2.0,
+            text="Hello world",
+            words=[
+                {"word": "Hello", "start": 0.0, "end": 0.5},
+                {"word": " world", "start": 0.5, "end": 1.0},
+            ],
+        )
+        db.session.add(segment)
+        db.session.commit()
         guid = post.guid
 
     client = app.test_client()
@@ -666,6 +679,10 @@ def test_post_stats_omits_debug_info_when_disabled(app):
     payload = response.get_json()
     assert payload is not None
     assert "debug_info" not in payload
+    assert payload["transcript_segments"][0]["words"] == [
+        {"word": "Hello", "start": 0.0, "end": 0.5},
+        {"word": " world", "start": 0.5, "end": 1.0},
+    ]
 
 
 def test_post_stats_include_chapters_for_chapter_insert_strategy(app):
