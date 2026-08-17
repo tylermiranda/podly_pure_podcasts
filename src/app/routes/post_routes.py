@@ -1083,17 +1083,31 @@ def api_reprocess_post_keep_transcript(p_guid: str) -> ResponseReturnValue:
             400,
         )
 
+    missing_word_timestamps = any(
+        not getattr(segment, "words", None) for segment in reusable_transcript_segments
+    )
+
     billing_user_id = getattr(user, "id", None)
 
     try:
         logger.info(
             "[API] Reprocess (keep transcript): cancelling jobs and clearing outputs "
-            "guid=%s post_id=%s",
+            "guid=%s post_id=%s missing_word_timestamps=%s",
             p_guid,
             post.id,
+            missing_word_timestamps,
         )
         get_jobs_manager().cancel_post_jobs(p_guid)
-        clear_post_processing_data_keep_transcript(post)
+        if missing_word_timestamps:
+            logger.info(
+                "[API] Reprocess (keep transcript): falling back to full "
+                "re-transcription guid=%s post_id=%s",
+                p_guid,
+                post.id,
+            )
+            clear_post_processing_data(post)
+        else:
+            clear_post_processing_data_keep_transcript(post)
 
         logger.info(
             "[API] Reprocess (keep transcript): starting post processing "
@@ -1109,7 +1123,13 @@ def api_reprocess_post_keep_transcript(p_guid: str) -> ResponseReturnValue:
         )
         status_code = 200 if result.get("status") in ("started", "completed") else 400
         if result.get("status") == "started":
-            result["message"] = "Post reprocessing started (keeping transcript)"
+            if missing_word_timestamps:
+                result["message"] = (
+                    "Post reprocessing started (full re-transcription; "
+                    "existing transcript lacked word timestamps)"
+                )
+            else:
+                result["message"] = "Post reprocessing started (keeping transcript)"
         logger.info(
             "[API] Reprocess (keep transcript): completed guid=%s status=%s code=%s",
             p_guid,

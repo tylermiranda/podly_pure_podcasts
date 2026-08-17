@@ -536,6 +536,7 @@ def test_reprocess_keep_transcript_accepts_local_whisper_model_call(app):
                     start_time=0.0,
                     end_time=5.0,
                     text="hello",
+                    words=[{"word": "hello", "start": 0.0, "end": 0.5}],
                 )
             )
             db.session.add(
@@ -558,7 +559,10 @@ def test_reprocess_keep_transcript_accepts_local_whisper_model_call(app):
             mock.patch("app.routes.post_routes.get_jobs_manager") as mock_mgr,
             mock.patch(
                 "app.routes.post_routes.clear_post_processing_data_keep_transcript"
-            ) as clear_mock,
+            ) as keep_mock,
+            mock.patch(
+                "app.routes.post_routes.clear_post_processing_data"
+            ) as full_mock,
         ):
             mock_mgr.return_value.start_post_processing.return_value = {
                 "status": "started",
@@ -572,7 +576,9 @@ def test_reprocess_keep_transcript_accepts_local_whisper_model_call(app):
         payload = response.get_json()
         assert payload is not None
         assert payload["status"] == "started"
-        clear_mock.assert_called_once()
+        assert payload["message"] == "Post reprocessing started (keeping transcript)"
+        keep_mock.assert_called_once()
+        full_mock.assert_not_called()
     finally:
         runtime_config.whisper = original_whisper
 
@@ -635,6 +641,123 @@ def test_reprocess_keep_transcript_rejects_transcript_for_old_whisper_model(app)
     assert payload is not None
     assert payload["error_code"] == "NO_REUSABLE_TRANSCRIPT"
     clear_mock.assert_not_called()
+
+
+def _keep_transcript_post_with_words(*, guid: str, words: list | None) -> str:
+    feed = Feed(title="Local Whisper Feed", rss_url="https://example.com/feed.xml")
+    db.session.add(feed)
+    db.session.commit()
+    post = Post(
+        feed_id=feed.id,
+        guid=guid,
+        download_url="https://example.com/audio.mp3",
+        title="Keep Transcript Episode",
+        whitelisted=True,
+    )
+    db.session.add(post)
+    db.session.commit()
+    db.session.add(
+        TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=0.0,
+            end_time=5.0,
+            text="hello",
+            words=words,
+        )
+    )
+    db.session.add(
+        ModelCall(
+            post_id=post.id,
+            first_segment_sequence_num=0,
+            last_segment_sequence_num=0,
+            model_name="local_base.en",
+            prompt="Whisper transcription job",
+            status="success",
+            language="en",
+        )
+    )
+    db.session.commit()
+    return post.guid
+
+
+def test_reprocess_keep_transcript_falls_back_when_words_missing(app):
+    app.testing = True
+    app.register_blueprint(post_bp)
+    original_whisper = runtime_config.whisper
+    runtime_config.whisper = LocalWhisperConfig(model="base.en")
+
+    try:
+        with app.app_context():
+            guid = _keep_transcript_post_with_words(
+                guid="missing-words-guid", words=None
+            )
+
+        client = app.test_client()
+        with (
+            mock.patch("app.routes.post_routes.get_jobs_manager") as mock_mgr,
+            mock.patch(
+                "app.routes.post_routes.clear_post_processing_data_keep_transcript"
+            ) as keep_mock,
+            mock.patch(
+                "app.routes.post_routes.clear_post_processing_data"
+            ) as full_mock,
+        ):
+            mock_mgr.return_value.start_post_processing.return_value = {
+                "status": "started",
+                "job_id": "job-full-123",
+                "message": "ok",
+            }
+            response = client.post(f"/api/posts/{guid}/reprocess/keep-transcript")
+
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload is not None
+        assert payload["status"] == "started"
+        assert "full re-transcription" in payload["message"]
+        full_mock.assert_called_once()
+        keep_mock.assert_not_called()
+        mock_mgr.return_value.start_post_processing.assert_called_once()
+    finally:
+        runtime_config.whisper = original_whisper
+
+
+def test_reprocess_keep_transcript_falls_back_when_words_empty(app):
+    app.testing = True
+    app.register_blueprint(post_bp)
+    original_whisper = runtime_config.whisper
+    runtime_config.whisper = LocalWhisperConfig(model="base.en")
+
+    try:
+        with app.app_context():
+            guid = _keep_transcript_post_with_words(guid="empty-words-guid", words=[])
+
+        client = app.test_client()
+        with (
+            mock.patch("app.routes.post_routes.get_jobs_manager") as mock_mgr,
+            mock.patch(
+                "app.routes.post_routes.clear_post_processing_data_keep_transcript"
+            ) as keep_mock,
+            mock.patch(
+                "app.routes.post_routes.clear_post_processing_data"
+            ) as full_mock,
+        ):
+            mock_mgr.return_value.start_post_processing.return_value = {
+                "status": "started",
+                "job_id": "job-full-456",
+                "message": "ok",
+            }
+            response = client.post(f"/api/posts/{guid}/reprocess/keep-transcript")
+
+        assert response.status_code == 200
+        payload = response.get_json()
+        assert payload is not None
+        assert payload["status"] == "started"
+        assert "full re-transcription" in payload["message"]
+        full_mock.assert_called_once()
+        keep_mock.assert_not_called()
+    finally:
+        runtime_config.whisper = original_whisper
 
 
 def test_post_stats_omits_debug_info_when_disabled(app):
