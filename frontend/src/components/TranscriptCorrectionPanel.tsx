@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'react-hot-toast';
 import { feedsApi } from '../services/api';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { getHttpErrorInfo } from '../utils/httpError';
@@ -96,7 +97,7 @@ export default function TranscriptCorrectionPanel({
   existingPrompt,
 }: TranscriptCorrectionPanelProps) {
   const queryClient = useQueryClient();
-  const { audioRef: globalAudioRef } = useAudioPlayer();
+  const { audioRef: globalAudioRef, reloadProcessedAudio } = useAudioPlayer();
   const originalAudioRef = useRef<HTMLAudioElement>(null);
   const pointerStart = useRef<{ x: number; y: number; index: number } | null>(null);
   const [anchorIndex, setAnchorIndex] = useState<number | null>(null);
@@ -161,8 +162,15 @@ export default function TranscriptCorrectionPanel({
     return () => window.removeEventListener('mouseup', onUp);
   }, [playFrom, segments]);
 
-  const refreshStats = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
+  const refreshAfterRecut = async () => {
+    feedsApi.bumpProcessedAudio(episodeGuid);
+    reloadProcessedAudio(episodeGuid);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] }),
+      queryClient.invalidateQueries({ queryKey: ['episode-status', episodeGuid] }),
+      queryClient.invalidateQueries({ queryKey: ['episodes'] }),
+    ]);
+    await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
   };
 
   const saveMutation = useMutation({
@@ -185,12 +193,13 @@ export default function TranscriptCorrectionPanel({
     onSuccess: async () => {
       setError(null);
       setStatus('Correction saved and processed audio recut.');
-      await refreshStats();
+      toast.success('Processed audio updated');
+      await refreshAfterRecut();
     },
     onError: async (err: unknown) => {
       setStatus(null);
       setError(getHttpErrorInfo(err).message);
-      await refreshStats();
+      await refreshAfterRecut();
     },
   });
 
@@ -199,7 +208,8 @@ export default function TranscriptCorrectionPanel({
     onSuccess: async () => {
       setError(null);
       setStatus('Processed audio recut from current corrections.');
-      await refreshStats();
+      toast.success('Processed audio updated');
+      await refreshAfterRecut();
     },
     onError: (err: unknown) => {
       setStatus(null);
@@ -217,7 +227,7 @@ export default function TranscriptCorrectionPanel({
       return feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
     },
     onSuccess: async () => {
-      await refreshStats();
+      await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
     },
   });
 
@@ -331,9 +341,7 @@ export default function TranscriptCorrectionPanel({
                   setStatus('Recutting processed audio…');
                   recutMutation.mutate();
                 }}
-                disabled={
-                  saveMutation.isPending || recutMutation.isPending || corrections.length === 0
-                }
+                disabled={saveMutation.isPending || recutMutation.isPending}
                 className="rounded border border-indigo-300 bg-white px-3 py-1.5 text-sm font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
               >
                 {recutMutation.isPending ? 'Recutting…' : 'Recut audio'}

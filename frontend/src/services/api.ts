@@ -23,6 +23,7 @@ import type {
 } from '../types';
 
 const API_BASE_URL = '';
+const processedAudioGeneration = new Map<string, number>();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -221,7 +222,13 @@ export const feedsApi = {
 
   // Get audio URL for post
   getPostAudioUrl: (guid: string): string => {
-    return buildAbsoluteUrl(`/api/posts/${guid}/audio`);
+    const url = buildAbsoluteUrl(`/api/posts/${guid}/audio`);
+    const generation = processedAudioGeneration.get(guid);
+    return generation ? `${url}?v=${generation}` : url;
+  },
+
+  bumpProcessedAudio: (guid: string): void => {
+    processedAudioGeneration.set(guid, Date.now());
   },
 
   getPostOriginalAudioUrl: (guid: string): string => {

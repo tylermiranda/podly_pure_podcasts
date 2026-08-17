@@ -14,6 +14,7 @@ interface AudioPlayerState {
 
 interface AudioPlayerContextType extends AudioPlayerState {
   playEpisode: (episode: Episode) => void;
+  reloadProcessedAudio: (guid: string) => void;
   togglePlayPause: () => void;
   seekTo: (time: number) => void;
   setVolume: (volume: number) => void;
@@ -65,6 +66,8 @@ const AudioPlayerContext = createContext<AudioPlayerContextType | undefined>(und
 export function AudioPlayerProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(audioPlayerReducer, initialState);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const currentEpisodeRef = useRef<Episode | null>(null);
+  currentEpisodeRef.current = state.currentEpisode;
 
   const playEpisode = (episode: Episode) => {
     console.log('playEpisode called with:', episode);
@@ -101,6 +104,26 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
       console.log('audioRef.current is null');
     }
   };
+
+  const reloadProcessedAudio = useCallback((guid: string) => {
+    feedsApi.bumpProcessedAudio(guid);
+    const audio = audioRef.current;
+    const current = currentEpisodeRef.current;
+    if (!audio || !current || current.guid !== guid) {
+      return;
+    }
+    const wasPlaying = !audio.paused;
+    audio.src = feedsApi.getPostAudioUrl(guid);
+    audio.load();
+    dispatch({ type: 'SET_CURRENT_TIME', payload: 0 });
+    dispatch({ type: 'SET_LOADING', payload: true });
+    if (wasPlaying) {
+      audio.play().catch((error) => {
+        dispatch({ type: 'SET_ERROR', payload: 'Failed to play audio' });
+        console.error('Audio play error:', error);
+      });
+    }
+  }, []);
 
   const togglePlayPause = useCallback(() => {
     if (!audioRef.current || !state.currentEpisode) return;
@@ -265,6 +288,7 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
   const contextValue: AudioPlayerContextType = {
     ...state,
     playEpisode,
+    reloadProcessedAudio,
     togglePlayPause,
     seekTo,
     setVolume,
