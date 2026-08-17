@@ -30,12 +30,34 @@ type AudioPlayerAction =
   | { type: 'SET_LOADING'; payload: boolean }
   | { type: 'SET_ERROR'; payload: string | null };
 
+const VOLUME_STORAGE_KEY = 'podly-player-volume';
+
+function readStoredVolume(): number {
+  try {
+    const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (raw === null) return 1;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return 1;
+    return Math.max(0, Math.min(value, 1));
+  } catch {
+    return 1;
+  }
+}
+
+function persistVolume(volume: number): void {
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(volume));
+  } catch {
+    // ignore storage errors
+  }
+}
+
 const initialState: AudioPlayerState = {
   currentEpisode: null,
   isPlaying: false,
   currentTime: 0,
   duration: 0,
-  volume: 1,
+  volume: readStoredVolume(),
   isLoading: false,
   error: null,
 };
@@ -92,6 +114,7 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
       const audioUrl = feedsApi.getPostAudioUrl(episode.guid);
       console.log('Using API audio URL:', audioUrl);
       
+      audioRef.current.volume = state.volume;
       audioRef.current.src = audioUrl;
       audioRef.current.load();
 
@@ -146,16 +169,24 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const setVolume = useCallback((volume: number) => {
+    const clamped = Math.max(0, Math.min(volume, 1));
     const audio = audioRef.current;
     // #region agent log
-    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume',message:'setVolume called',data:{volume,hasAudio:!!audio,audioVolumeBefore:audio?.volume},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume',message:'setVolume called',data:{volume:clamped,hasAudio:!!audio,audioVolumeBefore:audio?.volume},timestamp:Date.now(),hypothesisId:'C',runId:'post-fix'})}).catch(()=>{});
     // #endregion
+    persistVolume(clamped);
     if (audio) {
-      audio.volume = volume;
-      dispatch({ type: 'SET_VOLUME', payload: volume });
-      // #region agent log
-      fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume:after',message:'setVolume applied',data:{volume,audioVolumeAfter:audio.volume},timestamp:Date.now(),hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
+      audio.volume = clamped;
+    }
+    dispatch({ type: 'SET_VOLUME', payload: clamped });
+    // #region agent log
+    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayerContext.tsx:setVolume:after',message:'setVolume applied',data:{volume:clamped,audioVolumeAfter:audio?.volume,persisted:clamped},timestamp:Date.now(),hypothesisId:'C',runId:'post-fix'})}).catch(()=>{});
+    // #endregion
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = state.volume;
     }
   }, []);
 

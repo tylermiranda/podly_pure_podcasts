@@ -55,6 +55,13 @@ export default function AudioPlayer() {
   const volumeControlRef = useRef<HTMLDivElement>(null);
   const volumeTrackRef = useRef<HTMLDivElement>(null);
   const [isVolumeDragging, setIsVolumeDragging] = useState(false);
+  const lastNonZeroVolumeRef = useRef(volume > 0 ? volume : 1);
+
+  useEffect(() => {
+    if (volume > 0) {
+      lastNonZeroVolumeRef.current = volume;
+    }
+  }, [volume]);
 
   // Reset dismissed error when a new error occurs
   useEffect(() => {
@@ -90,10 +97,10 @@ export default function AudioPlayer() {
       const trackEl = volumeTrackRef.current;
       if (!trackEl) return;
       const trackRect = trackEl.getBoundingClientRect();
-      if (trackRect.width <= 0) return;
+      if (trackRect.height <= 0) return;
       const newVolume = Math.max(
         0,
-        Math.min((event.clientX - trackRect.left) / trackRect.width, 1)
+        Math.min(1 - (event.clientY - trackRect.top) / trackRect.height, 1)
       );
       setVolume(newVolume);
     };
@@ -163,19 +170,22 @@ export default function AudioPlayer() {
     }
   };
 
-  const volumeFromClientX = (clientX: number) => {
+  const volumeFromClientY = (clientY: number) => {
     const trackEl = volumeTrackRef.current;
     if (!trackEl) return null;
     const trackRect = trackEl.getBoundingClientRect();
-    if (trackRect.width <= 0) return null;
-    return Math.max(0, Math.min((clientX - trackRect.left) / trackRect.width, 1));
+    if (trackRect.height <= 0) return null;
+    return Math.max(
+      0,
+      Math.min(1 - (clientY - trackRect.top) / trackRect.height, 1)
+    );
   };
 
   const handleVolumeChange = (e: React.MouseEvent<HTMLDivElement>) => {
-    const newVolume = volumeFromClientX(e.clientX);
+    const newVolume = volumeFromClientY(e.clientY);
     if (newVolume === null) return;
     // #region agent log
-    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:handleVolumeChange',message:'volume click',data:{newVolume,trackWidth:volumeTrackRef.current?.getBoundingClientRect().width,currentVolume:volume},timestamp:Date.now(),hypothesisId:'A',runId:'post-fix'})}).catch(()=>{});
+    fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'dad5e2'},body:JSON.stringify({sessionId:'dad5e2',location:'AudioPlayer.tsx:handleVolumeChange',message:'volume click',data:{newVolume,trackHeight:volumeTrackRef.current?.getBoundingClientRect().height,currentVolume:volume,orientation:'vertical'},timestamp:Date.now(),hypothesisId:'A',runId:'post-fix'})}).catch(()=>{});
     // #endregion
     setVolume(newVolume);
   };
@@ -187,8 +197,21 @@ export default function AudioPlayer() {
     handleVolumeChange(e);
   };
 
+  const toggleVolumePanel = () => {
+    if (volume === 0) {
+      setVolume(lastNonZeroVolumeRef.current || 1);
+      setShowVolumeSlider(true);
+      return;
+    }
+    setShowVolumeSlider((open) => !open);
+  };
+
   const toggleMute = () => {
-    setVolume(volume > 0 ? 0 : 1);
+    if (volume > 0) {
+      setVolume(0);
+      return;
+    }
+    setVolume(lastNonZeroVolumeRef.current || 1);
   };
 
   const dismissError = () => {
@@ -294,16 +317,14 @@ export default function AudioPlayer() {
           {/* Volume Control */}
           <div
             ref={volumeControlRef}
-            className="relative flex items-center space-x-2"
-            onMouseEnter={() => setShowVolumeSlider(true)}
-            onMouseLeave={() => {
-              if (!isVolumeDragging) setShowVolumeSlider(false);
-            }}
+            className="relative flex items-center"
           >
             <button
               type="button"
-              onClick={toggleMute}
+              onClick={toggleVolumePanel}
               className="p-1 text-gray-600 hover:text-gray-900 transition-colors"
+              aria-expanded={showVolumeSlider}
+              aria-label="Volume"
             >
               {volume === 0 ? (
                 <SpeakerXMarkIcon className="w-5 h-5" />
@@ -314,27 +335,40 @@ export default function AudioPlayer() {
 
             {showVolumeSlider && (
               <div
-                className="absolute bottom-full right-0 mb-1 flex min-h-[2.25rem] min-w-[6.5rem] items-center rounded border border-gray-200 bg-white px-3 py-2 shadow-lg audio-player-volume-slider"
+                className="absolute bottom-full right-0 z-10 pt-2"
                 onMouseDown={(e) => e.stopPropagation()}
               >
-                <div
-                  ref={volumeTrackRef}
-                  role="slider"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={Math.round(volume * 100)}
-                  aria-label="Volume"
-                  className="relative h-2 w-24 flex-shrink-0 cursor-pointer rounded-full bg-gray-200"
-                  onMouseDown={handleVolumeMouseDown}
-                >
+                <div className="flex flex-col items-center gap-2 rounded border border-gray-200 bg-white px-3 py-3 shadow-lg audio-player-volume-slider">
+                  <span className="text-xs font-medium tabular-nums text-gray-600">
+                    {Math.round(volume * 100)}%
+                  </span>
                   <div
-                    className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-blue-600"
-                    style={{ width: `${volume * 100}%` }}
-                  />
-                  <div
-                    className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-y-1/2 rounded-full bg-blue-600"
-                    style={{ left: `calc(${volume * 100}% - 6px)` }}
-                  />
+                    ref={volumeTrackRef}
+                    role="slider"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(volume * 100)}
+                    aria-label="Volume"
+                    aria-orientation="vertical"
+                    className="relative h-28 w-2 flex-shrink-0 cursor-pointer rounded-full bg-gray-200"
+                    onMouseDown={handleVolumeMouseDown}
+                  >
+                    <div
+                      className="pointer-events-none absolute inset-x-0 bottom-0 rounded-full bg-blue-600"
+                      style={{ height: `${volume * 100}%` }}
+                    />
+                    <div
+                      className="pointer-events-none absolute left-1/2 h-3 w-3 -translate-x-1/2 rounded-full bg-blue-600"
+                      style={{ bottom: `calc(${volume * 100}% - 6px)` }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    className="text-xs text-gray-500 hover:text-gray-800 transition-colors"
+                  >
+                    {volume === 0 ? 'Unmute' : 'Mute'}
+                  </button>
                 </div>
               </div>
             )}
