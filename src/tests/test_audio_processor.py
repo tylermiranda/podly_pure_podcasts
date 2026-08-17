@@ -9,6 +9,12 @@ from app.models import Feed, Identification, Post, TranscriptSegment
 from podcast_processor.audio_processor import AudioProcessor
 from shared.config import Config
 from shared.test_utils import create_standard_test_config
+from tests.salvador_dali_fixture import (
+    NARRATIVE_START_TIMES,
+    SALVADOR_DALI_GOLD_WINDOWS,
+    persist_salvador_dali_episode,
+    windows_cover,
+)
 
 
 @pytest.fixture
@@ -200,6 +206,20 @@ def test_get_ad_segments_honors_identification_span(app: Flask) -> None:
             segments = processor.get_ad_segments(post)
 
         assert segments == [(0.0, 18.0)]
+
+
+def test_get_ad_segments_expands_dali_cta_labels(app: Flask) -> None:
+    with app.app_context():
+        post, _ = persist_salvador_dali_episode(db.session, guid="dali-audio-guid")
+        processor = AudioProcessor(config=create_standard_test_config())
+        windows = processor.get_ad_segments(post)
+
+    assert len(windows) == len(SALVADOR_DALI_GOLD_WINDOWS)
+    for predicted, gold in zip(windows, SALVADOR_DALI_GOLD_WINDOWS, strict=True):
+        assert predicted[0] == pytest.approx(gold[0], abs=0.2)
+        assert predicted[1] == pytest.approx(gold[1], abs=0.2)
+    for stamp in NARRATIVE_START_TIMES:
+        assert not windows_cover(windows, stamp)
 
 
 def test_merge_ad_segments(

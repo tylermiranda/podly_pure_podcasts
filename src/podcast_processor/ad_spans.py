@@ -12,8 +12,10 @@ from typing import Any
 from podcast_processor.content_guard import (
     ad_cut_window,
     has_content_resume,
+    has_sponsor_cue,
     is_content_only,
 )
+from podcast_processor.cue_detector import CueDetector
 
 OFFSET_START_TOLERANCE = 0.5
 INTERIOR_OFFSET_THRESHOLD = 0.5
@@ -23,6 +25,13 @@ AD_MERGE_PROXIMITY_SECONDS = 8.0
 AD_HOLE_FILL_SECONDS = 24.0
 AD_LEAD_IN_SECONDS = 45.0
 AD_LEAD_IN_MAX_GAP_SECONDS = 5.0
+AD_TRAIL_OUT_SECONDS = 45.0
+AD_TRAIL_OUT_MAX_GAP_SECONDS = 8.0
+SHORT_AD_COPY_CHARS = 100
+REPEATED_CREATIVE_MIN_COUNT = 3
+REPEATED_CREATIVE_MIN_CHARS = 24
+
+_CUE_DETECTOR = CueDetector()
 
 
 @dataclass(frozen=True)
@@ -186,9 +195,48 @@ def _segment_bounds(segment: Any) -> tuple[float, float]:
     return start, end
 
 
+def normalize_ad_copy(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def repeated_creative_texts(
+    segments: list[Any],
+    *,
+    min_count: int = REPEATED_CREATIVE_MIN_COUNT,
+    min_chars: int = REPEATED_CREATIVE_MIN_CHARS,
+) -> set[str]:
+    """Return normalized lines that repeat often enough to be a midroll creative."""
+    counts: dict[str, int] = {}
+    for segment in segments:
+        normalized = normalize_ad_copy(_segment_text(segment))
+        if len(normalized) < min_chars:
+            continue
+        counts[normalized] = counts.get(normalized, 0) + 1
+    return {text for text, count in counts.items() if count >= min_count}
+
+
 def _is_show_content(segment: Any) -> bool:
     text = _segment_text(segment)
     return is_content_only(text) or has_content_resume(text)
+
+
+def is_recoverable_ad_copy(segment: Any, repeated: set[str]) -> bool:
+    """True for unlabeled commercial copy we can recover without brand lists."""
+    text = _segment_text(segment)
+    if not text.strip() or _is_show_content(segment):
+        return False
+    if has_sponsor_cue(text) or _CUE_DETECTOR.has_promotional_copy(text):
+        return True
+    return normalize_ad_copy(text) in repeated
+
+
+def is_absorbable_ad_copy(segment: Any, repeated: set[str]) -> bool:
+    """Ad-copy we can fold into a cut window without eating narration."""
+    if _is_show_content(segment):
+        return False
+    if is_recoverable_ad_copy(segment, repeated):
+        return True
+    return len(_segment_text(segment).strip()) <= SHORT_AD_COPY_CHARS
 
 
 def merge_overlapping_windows(
@@ -207,14 +255,17 @@ def merge_overlapping_windows(
     return merged
 
 
-def _gap_has_show_content(
-    segments: list[Any], gap_start: float, gap_end: float
+def _gap_blocks_ad_fill(
+    segments: list[Any],
+    gap_start: float,
+    gap_end: float,
+    repeated: set[str],
 ) -> bool:
     for segment in segments:
         start, end = _segment_bounds(segment)
         if end <= gap_start + 0.05 or start >= gap_end - 0.05:
             continue
-        if _is_show_content(segment):
+        if not is_absorbable_ad_copy(segment, repeated):
             return True
     return False
 
@@ -224,16 +275,22 @@ def fill_ad_holes(
     segments: list[Any],
     *,
     max_gap: float = AD_HOLE_FILL_SECONDS,
+    repeated: set[str] | None = None,
 ) -> list[tuple[float, float]]:
     """Merge nearby ad windows when the unlabeled gap is not show content."""
     ordered = merge_overlapping_windows(windows)
     if len(ordered) < 2:
         return ordered
+    known_repeated = (
+        repeated if repeated is not None else repeated_creative_texts(segments)
+    )
     filled = [ordered[0]]
     for start, end in ordered[1:]:
         prev_start, prev_end = filled[-1]
         gap = start - prev_end
-        if 0 < gap <= max_gap and not _gap_has_show_content(segments, prev_end, start):
+        if 0 < gap <= max_gap and not _gap_blocks_ad_fill(
+            segments, prev_end, start, known_repeated
+        ):
             filled[-1] = (prev_start, end)
         else:
             filled.append((start, end))
@@ -246,10 +303,14 @@ def lead_in_ad_windows(
     *,
     max_lead: float = AD_LEAD_IN_SECONDS,
     max_gap: float = AD_LEAD_IN_MAX_GAP_SECONDS,
+    repeated: set[str] | None = None,
 ) -> list[tuple[float, float]]:
     """Extend each ad window backward through unlabeled ad-copy, not cold-opens."""
     if not windows:
         return []
+    known_repeated = (
+        repeated if repeated is not None else repeated_creative_texts(segments)
+    )
     ordered_segs = sorted(segments, key=lambda seg: _segment_bounds(seg)[0])
     expanded: list[tuple[float, float]] = []
     for start, end in windows:
@@ -264,11 +325,47 @@ def lead_in_ad_windows(
                 break
             if cursor - seg_end > max_gap:
                 break
-            if _is_show_content(seg):
+            if not is_absorbable_ad_copy(seg, known_repeated):
                 break
             new_start = seg_start
             cursor = seg_start
         expanded.append((new_start, end))
+    return merge_overlapping_windows(expanded)
+
+
+def trail_out_ad_windows(
+    windows: list[tuple[float, float]],
+    segments: list[Any],
+    *,
+    max_trail: float = AD_TRAIL_OUT_SECONDS,
+    max_gap: float = AD_TRAIL_OUT_MAX_GAP_SECONDS,
+    repeated: set[str] | None = None,
+) -> list[tuple[float, float]]:
+    """Extend each ad window forward through unlabeled commercial copy."""
+    if not windows:
+        return []
+    known_repeated = (
+        repeated if repeated is not None else repeated_creative_texts(segments)
+    )
+    ordered_segs = sorted(segments, key=lambda seg: _segment_bounds(seg)[0])
+    expanded: list[tuple[float, float]] = []
+    for start, end in windows:
+        new_end = end
+        cursor = end
+        following = [
+            seg for seg in ordered_segs if _segment_bounds(seg)[0] >= end - 0.05
+        ]
+        for seg in following:
+            seg_start, seg_end = _segment_bounds(seg)
+            if seg_end - end > max_trail and seg_end - new_end > 4.0:
+                break
+            if seg_start - cursor > max_gap:
+                break
+            if not is_absorbable_ad_copy(seg, known_repeated):
+                break
+            new_end = max(new_end, seg_end)
+            cursor = seg_end
+        expanded.append((start, new_end))
     return merge_overlapping_windows(expanded)
 
 
@@ -277,4 +374,13 @@ def expand_cut_windows(
     segments: list[Any],
 ) -> list[tuple[float, float]]:
     """Recover full ad reads from CTA-only LLM spans."""
-    return fill_ad_holes(lead_in_ad_windows(windows, segments), segments)
+    repeated = repeated_creative_texts(segments)
+    return fill_ad_holes(
+        trail_out_ad_windows(
+            lead_in_ad_windows(windows, segments, repeated=repeated),
+            segments,
+            repeated=repeated,
+        ),
+        segments,
+        repeated=repeated,
+    )

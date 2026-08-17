@@ -15,9 +15,13 @@ from app.extensions import db
 from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
 from podcast_processor.ad_spans import (
+    AD_TRAIL_OUT_MAX_GAP_SECONDS,
     apply_content_guard_to_span,
     find_containing_segment,
     identification_span,
+    is_recoverable_ad_copy,
+    normalize_ad_copy,
+    repeated_creative_texts,
     resolve_prediction_spans,
 )
 from podcast_processor.boundary_refiner import BoundaryRefiner
@@ -192,6 +196,7 @@ class AdClassifier:
                     break
 
             self._apply_sponsor_cue_labels(transcript_segments, post)
+            self._label_repeated_creatives(transcript_segments, post)
 
             # Expand neighbors using bulk operations
             # NOTE: Use self.db_session.query() instead of self.identification_query
@@ -1003,7 +1008,7 @@ class AdClassifier:
         matched: list[TranscriptSegment] = []
         for segment in chunk_segments:
             text = segment.text or ""
-            if is_content_only(text) or not self.cue_detector.has_strong_ad_cue(text):
+            if is_content_only(text) or not self._has_fallback_ad_cue(text):
                 continue
             if self._segment_has_ad_identification(segment.id):
                 continue
@@ -1153,7 +1158,7 @@ class AdClassifier:
             if segment.id in existing_ids:
                 continue
             text = segment.text or ""
-            if is_content_only(text) or not self.cue_detector.has_strong_ad_cue(text):
+            if is_content_only(text) or not self._has_fallback_ad_cue(text):
                 continue
             window = apply_content_guard_to_span(
                 segment,
@@ -1183,6 +1188,153 @@ class AdClassifier:
             post.id,
         )
         return created
+
+    def _has_fallback_ad_cue(self, text: str) -> bool:
+        return self.cue_detector.has_strong_ad_cue(
+            text
+        ) or self.cue_detector.has_promotional_copy(text)
+
+    def _label_repeated_creatives(
+        self, transcript_segments: list[TranscriptSegment], post: Post
+    ) -> int:
+        """Label confirmed repeated midroll creatives after CTA-only LLM hits."""
+        if not transcript_segments:
+            return 0
+
+        model_call = self._latest_llm_model_call(post.id)
+        if model_call is None:
+            return 0
+
+        repeated = repeated_creative_texts(transcript_segments)
+        if not repeated:
+            return 0
+
+        existing_ids = {
+            row[0]
+            for row in self.db_session.query(Identification.transcript_segment_id)
+            .join(TranscriptSegment)
+            .filter(
+                TranscriptSegment.post_id == post.id,
+                Identification.label == "ad",
+            )
+            .all()
+        }
+        anchors, confirmed = self._repeated_creative_seeds(
+            transcript_segments, existing_ids, repeated
+        )
+        self._grow_confirmed_creatives(
+            transcript_segments, repeated, anchors, confirmed
+        )
+        to_insert = self._repeated_creative_rows(
+            transcript_segments, existing_ids, confirmed, model_call
+        )
+        if not to_insert:
+            return 0
+
+        created = self._create_identifications_bulk(to_insert)
+        self.logger.info(
+            "Repeated-creative fallback labeled %s segments for post %s",
+            created,
+            post.id,
+        )
+        return created
+
+    def _repeated_creative_seeds(
+        self,
+        transcript_segments: list[TranscriptSegment],
+        existing_ids: set[int],
+        repeated: set[str],
+    ) -> tuple[list[tuple[float, float]], set[str]]:
+        anchors: list[tuple[float, float]] = []
+        confirmed: set[str] = set()
+        for segment in transcript_segments:
+            start = float(segment.start_time or 0.0)
+            end = float(segment.end_time or start)
+            text = segment.text or ""
+            is_seed = segment.id in existing_ids or self._has_fallback_ad_cue(text)
+            if is_seed:
+                anchors.append((start, end))
+            if is_seed and normalize_ad_copy(text) in repeated:
+                confirmed.add(normalize_ad_copy(text))
+        return anchors, confirmed
+
+    def _grow_confirmed_creatives(
+        self,
+        transcript_segments: list[TranscriptSegment],
+        repeated: set[str],
+        anchors: list[tuple[float, float]],
+        confirmed: set[str],
+    ) -> None:
+        for _ in range(len(transcript_segments)):
+            added = False
+            for segment in transcript_segments:
+                text = segment.text or ""
+                normalized = normalize_ad_copy(text)
+                if (
+                    is_content_only(text)
+                    or normalized not in repeated
+                    or normalized in confirmed
+                ):
+                    continue
+                start = float(segment.start_time or 0.0)
+                end = float(segment.end_time or start)
+                if not self._near_anchor(
+                    start, end, anchors, AD_TRAIL_OUT_MAX_GAP_SECONDS
+                ):
+                    continue
+                confirmed.add(normalized)
+                anchors.append((start, end))
+                added = True
+            if not added:
+                return
+
+    def _repeated_creative_rows(
+        self,
+        transcript_segments: list[TranscriptSegment],
+        existing_ids: set[int],
+        confirmed: set[str],
+        model_call: ModelCall,
+    ) -> list[dict[str, Any]]:
+        to_insert: list[dict[str, Any]] = []
+        for segment in transcript_segments:
+            text = segment.text or ""
+            if (
+                segment.id in existing_ids
+                or is_content_only(text)
+                or normalize_ad_copy(text) not in confirmed
+            ):
+                continue
+            window = apply_content_guard_to_span(
+                segment,
+                float(segment.start_time or 0.0),
+                float(segment.end_time or 0.0),
+            )
+            if window is None:
+                continue
+            to_insert.append(
+                self._identification_row(
+                    segment=segment,
+                    model_call=model_call,
+                    confidence=max(0.85, float(self.config.output.min_confidence)),
+                    start=window[0],
+                    end=window[1],
+                )
+            )
+            existing_ids.add(segment.id)
+        return to_insert
+
+    @staticmethod
+    def _near_anchor(
+        start: float,
+        end: float,
+        anchors: list[tuple[float, float]],
+        max_gap: float,
+    ) -> bool:
+        for anchor_start, anchor_end in anchors:
+            gap = max(0.0, start - anchor_end, anchor_start - end)
+            if gap <= max_gap:
+                return True
+        return False
 
     def _is_retryable_error(self, error: Exception) -> bool:
         """Determine if an error should be retried."""
@@ -1465,15 +1617,13 @@ class AdClassifier:
 
         # PHASE 1: Bulk data collection (2 queries)
 
-        # Collect all sequence numbers we need
-        sequence_numbers = set()
-        for ident in ad_identifications:
-            base_seq = ident.transcript_segment.sequence_num
-            for offset in range(-window, window + 1):
-                sequence_numbers.add(base_seq + offset)
-
-        # Query 1: Bulk fetch segments
-        segments_by_seq = self._get_segments_bulk(post_id, list(sequence_numbers))
+        all_segments = (
+            self.db_session.query(TranscriptSegment)
+            .filter(TranscriptSegment.post_id == post_id)
+            .all()
+        )
+        segments_by_seq = {seg.sequence_num: seg for seg in all_segments}
+        repeated = repeated_creative_texts(all_segments)
 
         # Query 2: Bulk fetch existing identifications
         existing = self._get_existing_ids_bulk(post_id, model_call.id)
@@ -1505,6 +1655,7 @@ class AdClassifier:
                 has_strong_cue = self.cue_detector.has_strong_ad_cue(text)
                 is_transition = signals["transition"]
                 is_self_promo = signals["self_promo"]
+                is_recoverable = is_recoverable_ad_copy(seg, repeated)
 
                 gap_seconds = abs(
                     (seg.start_time or 0.0)
@@ -1515,6 +1666,7 @@ class AdClassifier:
                     has_strong_cue=has_strong_cue,
                     is_transition=is_transition,
                     gap_seconds=gap_seconds,
+                    is_recoverable=is_recoverable,
                 ):
                     continue
 
@@ -1548,9 +1700,10 @@ class AdClassifier:
         has_strong_cue: bool,
         is_transition: bool,
         gap_seconds: float,
+        is_recoverable: bool = False,
     ) -> bool:
         del gap_seconds
-        return has_strong_cue or is_transition
+        return has_strong_cue or is_transition or is_recoverable
 
     @staticmethod
     def _neighbor_confidence(

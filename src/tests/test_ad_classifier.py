@@ -17,6 +17,7 @@ from podcast_processor.model_output import (
 )
 from shared.config import Config
 from shared.test_utils import create_standard_test_config
+from tests.salvador_dali_fixture import persist_salvador_dali_episode
 
 
 @pytest.fixture
@@ -573,6 +574,96 @@ def test_should_not_expand_neighbor_on_gap_alone(
         )
         is True
     )
+
+
+def test_should_expand_neighbor_on_recoverable_copy(
+    test_classifier_with_mocks: AdClassifier,
+) -> None:
+    assert (
+        test_classifier_with_mocks._should_expand_neighbor(
+            has_strong_cue=False,
+            is_transition=False,
+            gap_seconds=5.0,
+            is_recoverable=True,
+        )
+        is True
+    )
+
+
+def test_apply_sponsor_cue_labels_promotional_copy_without_url(
+    test_config: Config, app: Flask
+) -> None:
+    with app.app_context():
+        feed = Feed(title="Short History Of", rss_url="http://example.com/sho.rss")
+        post = Post(
+            feed=feed,
+            guid="noiser-plus-1",
+            download_url="http://example.com/sho.mp3",
+            title="Noiser Plus",
+            unprocessed_audio_path="/tmp/sho.mp3",
+        )
+        db.session.add_all([feed, post])
+        db.session.commit()
+        model_call = ModelCall(
+            post_id=post.id,
+            model_name="test-model",
+            first_segment_sequence_num=0,
+            last_segment_sequence_num=1,
+            prompt="classify",
+            response='{"ad_segments":[]}',
+            status="success",
+            language=None,
+        )
+        promo = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=0,
+            start_time=2996.3,
+            end_time=3002.6,
+            text=(
+                "You can listen to the next two episodes of Short History of "
+                "right now, without waiting and without adverts, by subscribing "
+                "to Noiser+."
+            ),
+        )
+        story = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=1,
+            start_time=59.4,
+            end_time=61.4,
+            text="It is July the 1st, 1936.",
+        )
+        db.session.add_all([model_call, promo, story])
+        db.session.commit()
+
+        classifier = AdClassifier(config=test_config, db_session=db.session)
+        created = classifier._apply_sponsor_cue_labels([promo, story], post)
+
+        assert created == 1
+        labeled = Identification.query.filter_by(label="ad").all()
+        assert labeled[0].transcript_segment_id == promo.id
+
+
+def test_label_repeated_creatives_marks_confirmed_midroll_copy(
+    test_config: Config, app: Flask
+) -> None:
+    with app.app_context():
+        post, segments = persist_salvador_dali_episode(
+            db.session, guid="dali-classifier-guid"
+        )
+        classifier = AdClassifier(config=test_config, db_session=db.session)
+        created = classifier._label_repeated_creatives(segments, post)
+
+        assert created > 0
+        labeled_texts = {
+            ident.transcript_segment.text
+            for ident in Identification.query.filter_by(label="ad").all()
+        }
+        assert (
+            "When you think about Crocs, you think the classic clog." in labeled_texts
+        )
+        assert "Chevy is called the heartbeat of America for a reason." in labeled_texts
+        assert "It is July the 1st, 1936." not in labeled_texts
+        assert "That's next time." not in labeled_texts
 
 
 def test_create_identifications_matches_interior_offset(

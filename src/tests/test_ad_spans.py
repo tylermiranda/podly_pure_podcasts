@@ -9,8 +9,16 @@ from podcast_processor.ad_spans import (
     find_containing_segment,
     lead_in_ad_windows,
     resolve_prediction_spans,
+    trail_out_ad_windows,
 )
 from podcast_processor.model_output import AdSegmentPrediction
+from tests.salvador_dali_fixture import (
+    NARRATIVE_START_TIMES,
+    SALVADOR_DALI_GOLD_WINDOWS,
+    labeled_ad_windows,
+    salvador_dali_segments,
+    windows_cover,
+)
 
 
 def _seg(
@@ -178,3 +186,30 @@ def test_expand_cut_windows_recovers_full_preroll() -> None:
     ]
     windows = expand_cut_windows([(4.9, 11.3), (29.7, 35.1)], segs)
     assert windows == [(0.1, 35.1)]
+
+
+def test_trail_out_recovers_second_advertiser_after_cta() -> None:
+    segs = salvador_dali_segments()
+    preroll_cta = (21.1, 24.5)
+    trailed = trail_out_ad_windows([preroll_cta], segs)
+    assert trailed[0][0] == pytest.approx(21.1)
+    assert trailed[0][1] == pytest.approx(55.9)
+    assert not windows_cover(trailed, 59.4)
+
+
+def test_lead_in_does_not_eat_unique_story_before_midroll() -> None:
+    segs = salvador_dali_segments()
+    expanded = lead_in_ad_windows([(698.3, 701.7)], segs)
+    assert expanded[0][0] == pytest.approx(678.2)
+    assert not windows_cover(expanded, 670.2)
+
+
+def test_expand_cut_windows_recovers_dali_blocks_without_story_bleed() -> None:
+    segs = salvador_dali_segments()
+    windows = expand_cut_windows(labeled_ad_windows(segs), segs)
+    assert len(windows) == len(SALVADOR_DALI_GOLD_WINDOWS)
+    for predicted, gold in zip(windows, SALVADOR_DALI_GOLD_WINDOWS, strict=True):
+        assert predicted[0] == pytest.approx(gold[0], abs=0.2)
+        assert predicted[1] == pytest.approx(gold[1], abs=0.2)
+    for stamp in NARRATIVE_START_TIMES:
+        assert not windows_cover(windows, stamp)

@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 from unittest import mock
 
+import pytest
 from flask import g
 
 from app.extensions import db
@@ -10,6 +11,12 @@ from app.models import Feed, ModelCall, Post, TranscriptSegment, User
 from app.routes.post_routes import post_bp
 from app.runtime_config import config as runtime_config
 from shared.config import LocalWhisperConfig
+from tests.salvador_dali_fixture import (
+    NARRATIVE_START_TIMES,
+    SALVADOR_DALI_GOLD_WINDOWS,
+    persist_salvador_dali_episode,
+    windows_cover,
+)
 
 
 def test_download_endpoints_increment_counter(app, tmp_path):
@@ -936,3 +943,32 @@ def test_post_stats_includes_debug_info_when_enabled(app, tmp_path):
         c["path"] == str(processed_audio.resolve()) and c["exists"] is True
         for c in candidates
     )
+
+
+def test_post_stats_ad_blocks_are_expanded_final_cuts(app):
+    app.testing = True
+    app.register_blueprint(post_bp)
+
+    with app.app_context():
+        post, _ = persist_salvador_dali_episode(db.session, guid="dali-stats-guid")
+        guid = post.guid
+
+    client = app.test_client()
+    response = client.get(f"/api/posts/{guid}/stats")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload is not None
+    stats = payload["processing_stats"]
+    labeled = [
+        (block["start_time"], block["end_time"]) for block in stats["labeled_ad_blocks"]
+    ]
+    final = [(block["start_time"], block["end_time"]) for block in stats["ad_blocks"]]
+    labeled_duration = sum(end - start for start, end in labeled)
+    final_duration = sum(end - start for start, end in final)
+    assert final_duration > labeled_duration
+    assert len(final) == len(SALVADOR_DALI_GOLD_WINDOWS)
+    for predicted, gold in zip(final, SALVADOR_DALI_GOLD_WINDOWS, strict=True):
+        assert predicted[0] == pytest.approx(gold[0], abs=0.2)
+        assert predicted[1] == pytest.approx(gold[1], abs=0.2)
+    for stamp in NARRATIVE_START_TIMES:
+        assert not windows_cover(final, stamp)

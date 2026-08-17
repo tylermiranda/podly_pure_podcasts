@@ -34,6 +34,13 @@ CONTENT_RESUME_PATTERNS: tuple[Pattern[str], ...] = (
     re.compile(r"\bfact-?checked by\b", re.I),
     re.compile(r"\bpresented by me,?\b", re.I),
     re.compile(r"\btoday on (?:the show|summer school|planet money)\b", re.I),
+    re.compile(
+        r"\bit is (?:january|february|march|april|may|june|july|august|"
+        r"september|october|november|december)\b",
+        re.I,
+    ),
+    re.compile(r"\bit'?s \d+ in the morning\b", re.I),
+    re.compile(r"\bthat's next time\b", re.I),
 )
 
 # Kept for tests/callers that inspect the regex list. Detection uses CueDetector.

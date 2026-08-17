@@ -14,7 +14,8 @@ class CueDetector:
             r"\b(?:\+?1[ -]?)?\d{3}[ -]?\d{3}[ -]?\d{4}\b"
         )
         self.cta_pattern: Pattern[str] = re.compile(
-            r"\b(visit|go to|check out|head over|sign up|start today|start now|use code|offer|deal|free trial)\b",
+            r"\b(visit|go to|head to|check out|head over|sign up|start today|"
+            r"start now|use code|offer|deal|free trial|store near you)\b",
             re.I,
         )
         self.transition_pattern: Pattern[str] = re.compile(
@@ -39,6 +40,16 @@ class CueDetector:
             r")",
             re.I,
         )
+        # Promotional phrasing without a URL yet (network premium, unlock CTAs).
+        self.promotional_copy_pattern: Pattern[str] = re.compile(
+            r"(?:"
+            r"\bwithout (?:ads|adverts|advertisements)\b|"
+            r"\bunlock more episodes\b|"
+            r"\bhit the link\b|"
+            r"\bepisode description\b"
+            r")",
+            re.I,
+        )
 
     def has_cue(self, text: str) -> bool:
         return bool(
@@ -46,7 +57,11 @@ class CueDetector:
             or self.promo_pattern.search(text)
             or self.phone_pattern.search(text)
             or self.cta_pattern.search(text)
+            or self.promotional_copy_pattern.search(text)
         )
+
+    def has_promotional_copy(self, text: str) -> bool:
+        return bool(self.promotional_copy_pattern.search(text or ""))
 
     def has_strong_ad_cue(self, text: str) -> bool:
         """URL, promo code, phone, or sponsor-language — not generic 'go to' CTAs."""
@@ -69,6 +84,7 @@ class CueDetector:
             "transition": bool(self.transition_pattern.search(text)),
             "self_promo": bool(self.self_promo_pattern.search(text)),
             "sponsor_language": bool(self.sponsor_language_pattern.search(text)),
+            "promotional_copy": bool(self.promotional_copy_pattern.search(text)),
         }
 
     def highlight_cues(self, text: str) -> str:
@@ -84,6 +100,8 @@ class CueDetector:
             self.cta_pattern,
             self.transition_pattern,
             self.self_promo_pattern,
+            self.promotional_copy_pattern,
+            self.sponsor_language_pattern,
         ]
 
         for pattern in patterns:

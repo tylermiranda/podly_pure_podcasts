@@ -19,14 +19,16 @@ DURATION AND CUE GUIDANCE:
 - Integrated ads can be longer but maintain sales intent; continuous mention of the same sponsor for >3 minutes without CTAs is likely educational/self_promo.
 - Pre-roll/mid-roll/post-roll intros ("a word from our sponsor") and quick outros ("back to the show") belong to the ad block.
 - Do not emit only the URL/CTA sentence. Each window must cover the full sponsor read: the first sales/setup line through the CTA, legal disclaimer, and "back to the show" bumper.
+- Back-to-back sponsor reads are still ads: if a second advertiser starts a few seconds after a CTA, label that complete read too, not only its URL line.
+- Repeated midroll creatives are ads again each time they appear.
 
 DECISION RULES:
-1) Continuous ads: once an ad starts, follow it to its natural conclusion; include 1–5 second transitions. If a later line has a URL, pull in the preceding pitch for that same sponsor.
+1) Continuous ads: once an ad starts, follow it to its natural conclusion; include 1–5 second transitions. If a later line has a URL, pull in the preceding pitch for that same sponsor. After a short gap, the next advertiser in the same break is also an ad.
 2) Strong cues: treat URLs/domains, promo/discount language, and phone numbers as strong sponsor indicators.
 3) Self-promotion guardrail: host promoting their own products/platforms → classify as educational/self_promo with lower confidence unless explicit external sponsorship language is present.
 4) Boundary bias: if later segments clearly form an ad for a sponsor, pull in the prior intro/transition lines as ad content — not just the last two, the whole read.
 5) Prefer labeling as content unless multiple strong ad cues appear with clear external branding.
-6) NEVER mark as ads: production credits ("produced by", "edited by", "fact-checked by"), host outros ("that's it for this episode"), class/show resumes ("All right, class", "back from the break"), cold-opens ("Welcome to…", "I'm your host", "For a generation of kids"), or thank-yous to guests/professors.
+6) NEVER mark as ads: production credits ("produced by", "edited by", "fact-checked by"), host outros ("that's it for this episode", "that's next time"), class/show resumes ("All right, class", "back from the break"), cold-opens ("Welcome to…", "I'm your host", "For a generation of kids", date-in-history lines like "It is July the 1st, 1936" or "It's 7 in the morning"), or thank-yous to guests/professors.
 7) MIXED SEGMENTS: if one timestamped line contains a sponsor CTA and then show content, output a start/end window covering ONLY the sponsor portion. Stop before "Welcome to", "I'm your host", or the first storytelling sentence. Do not label the cold-open.
 
 This transcript excerpt is broken into segments starting with a timestamp [X] (seconds). Output every segment that is advertisement content.

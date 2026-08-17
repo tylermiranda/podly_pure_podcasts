@@ -65,7 +65,7 @@ Use a tag for patterns shared across a network or creator; use the per-feed cust
 | Tag | Good for | Prompt gist |
 |-----|----------|-------------|
 | `wondery` | Wondery originals | Preroll network/show promo; midroll “brought to you by” host-reads; cross-promo for other Wondery titles. Keep narrative storytelling as content. |
-| `noiser` | Noiser shows (`Short History Of…`, `Real Survival Stories`, …) | Preroll/partner blocks; midroll sponsor stings; other-Noiser cross-promo. Prefer cutting whole ad blocks, not leaving short sponsor tails. |
+| `noiser` | Noiser shows (`Short History Of…`, `Real Survival Stories`, …) | Complete preroll/midroll/partner blocks (including back-to-back advertisers and repeated creatives); Noiser+ promo. Keep date cold-opens and history narration. |
 | `npr` | NPR / public radio | Short underwriting (“support for … comes from”), membership/NPR Plus pitches. Keep reporting and explainers. |
 | `acquired` | Long-form host-read interview shows | Distinct midroll sponsor reads with promo codes/URLs; do not mark host banter or business analysis as ads. |
 
@@ -73,12 +73,10 @@ Use a tag for patterns shared across a network or creator; use the per-feed cust
 
 ```text
 This is a Noiser production (e.g. Short History Of..., Real Survival Stories). Ads often:
-- Open with a Noiser/network or partner preroll
-- Use midroll host-read or produced sponsor blocks with clear 'ad break' pacing or stings
-- Promote other Noiser shows at boundaries
-Identify sponsor reads and promo blocks as ads. Preserve narrative history storytelling and
-dramatic reenactment as content. Prefer cutting whole ad blocks rather than leaving short
-sponsor tails at the edges.
+- Open with a Noiser/network or partner preroll (sometimes two advertisers back-to-back)
+- Repeat the same midroll sponsor creative later in the episode; each repeat is an ad
+- Promote Noiser+ or other Noiser shows at episode boundaries
+Identify complete sponsor blocks as ads, including the pitch before each CTA/URL and the next advertiser after a short gap. Do not emit only the CTA line. Preserve narrative history storytelling, dramatic reenactment, and date cold-opens ("It is July the 1st, 1936", "It's 7 in the morning") as content. "That's next time" is show content, not an ad. Prefer cutting whole ad blocks rather than leaving short sponsor tails.
 ```
 
 **Example workflow**

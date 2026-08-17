@@ -3,9 +3,17 @@ from types import SimpleNamespace
 from podcast_processor.ad_eval import score_windows, window_iou
 from podcast_processor.ad_spans import (
     apply_content_guard_to_span,
+    expand_cut_windows,
     resolve_prediction_spans,
 )
 from podcast_processor.model_output import AdSegmentPrediction
+from tests.salvador_dali_fixture import (
+    NARRATIVE_START_TIMES,
+    SALVADOR_DALI_GOLD_WINDOWS,
+    labeled_ad_windows,
+    salvador_dali_segments,
+    windows_cover,
+)
 
 
 def test_window_iou_perfect_and_partial() -> None:
@@ -46,3 +54,15 @@ def test_gold_mixed_whisper_line_is_trimmed_not_whole_segment() -> None:
     gold = (111.7, 120.0)
     assert window_iou(window, gold) >= 0.5
     assert window[1] < 125.0
+
+
+def test_salvador_dali_expanded_windows_match_gold() -> None:
+    segs = salvador_dali_segments()
+    predicted = expand_cut_windows(labeled_ad_windows(segs), segs)
+    result = score_windows(predicted, SALVADOR_DALI_GOLD_WINDOWS, iou_threshold=0.5)
+    assert result["false_negatives"] == 0
+    assert result["false_positives"] == 0
+    assert result["recall"] == 1.0
+    assert result["precision"] == 1.0
+    for stamp in NARRATIVE_START_TIMES:
+        assert not windows_cover(predicted, stamp)

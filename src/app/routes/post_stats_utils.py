@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from podcast_processor.ad_spans import expand_cut_windows, identification_cut_window
+
 
 def count_model_calls(
     model_calls: Iterable[Any],
@@ -100,6 +102,36 @@ def merge_time_windows(
 
     merged.append((current_start, current_end))
     return merged
+
+
+def labeled_cut_windows(
+    identifications: Iterable[Any],
+) -> list[tuple[float, float]]:
+    """Cut windows from stored ad labels, honoring identification start/end."""
+    windows: list[tuple[float, float]] = []
+    for ident in identifications:
+        if getattr(ident, "label", None) != "ad":
+            continue
+        segment = getattr(ident, "transcript_segment", None)
+        if segment is None:
+            continue
+        window = identification_cut_window(ident, segment)
+        if window is not None:
+            windows.append(window)
+    return windows
+
+
+def final_cut_windows(
+    identifications: Iterable[Any],
+    transcript_segments: Iterable[Any],
+    refined_windows: list[tuple[float, float]] | None = None,
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    """Return (labeled blocks, expanded final cut blocks)."""
+    labeled = labeled_cut_windows(identifications)
+    labeled_blocks = merge_time_windows(labeled, gap_seconds=1.0)
+    source = refined_windows or labeled
+    expanded = expand_cut_windows(source, list(transcript_segments))
+    return labeled_blocks, merge_time_windows(expanded, gap_seconds=1.0)
 
 
 def is_mixed_segment(

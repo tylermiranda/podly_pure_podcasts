@@ -29,9 +29,9 @@ from app.posts import (
 from app.routes.post_stats_utils import (
     count_model_calls,
     count_primary_labels,
+    final_cut_windows,
     group_identifications_by_segment,
     is_mixed_segment,
-    merge_time_windows,
     parse_refined_windows,
 )
 from app.routes.post_utils import (
@@ -461,7 +461,6 @@ def api_post_stats(p_guid: str) -> flask.Response:
 
     transcript_segments_data = []
     segment_mixed_by_id: dict[int, bool] = {}
-    ad_windows_from_segments: list[tuple[float, float]] = []
     for segment in transcript_segments:
         segment_identifications = identifications_by_segment.get(segment.id, [])
 
@@ -470,8 +469,6 @@ def api_post_stats(p_guid: str) -> flask.Response:
 
         seg_start = float(segment.start_time)
         seg_end = float(segment.end_time)
-        if has_ad_label:
-            ad_windows_from_segments.append((seg_start, seg_end))
         mixed = bool(has_ad_label) and is_mixed_segment(
             seg_start=seg_start, seg_end=seg_end, refined_windows=refined_windows
         )
@@ -552,9 +549,14 @@ def api_post_stats(p_guid: str) -> flask.Response:
     ):
         chapters_data = _get_chapter_stats(post, feed)
 
-    # Calculate ad blocks and statistics for LLM-based processing
-    ad_windows_source = refined_windows or ad_windows_from_segments
-    ad_blocks = merge_time_windows(ad_windows_source, gap_seconds=1.0)
+    # Calculate ad blocks and statistics for LLM-based processing.
+    # ad_blocks are the expanded windows actually used for cutting; labeled_ad_blocks
+    # are the raw LLM/cue identifications before recovery.
+    labeled_ad_blocks, ad_blocks = final_cut_windows(
+        identifications,
+        transcript_segments,
+        refined_windows=refined_windows or None,
+    )
     ad_time_seconds = sum(end - start for start, end in ad_blocks if end > start)
 
     cut_duration_seconds = float(post.duration or 0)
@@ -599,6 +601,13 @@ def api_post_stats(p_guid: str) -> flask.Response:
                     "end_time": round(end, 1),
                 }
                 for start, end in ad_blocks
+            ],
+            "labeled_ad_blocks": [
+                {
+                    "start_time": round(start, 1),
+                    "end_time": round(end, 1),
+                }
+                for start, end in labeled_ad_blocks
             ],
             "model_call_statuses": model_call_statuses,
             "model_types": model_types,

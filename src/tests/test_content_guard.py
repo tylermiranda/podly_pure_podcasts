@@ -143,3 +143,15 @@ def test_merger_still_merges_shared_sponsor() -> None:
         keywords=["zocdoc.com"],
     )
     assert merger._should_merge(left, right) is True
+
+
+def test_date_cold_open_is_content_only() -> None:
+    assert is_content_only("It is July the 1st, 1936.")
+    assert is_content_only("It is August 1929, in the village of Caracas.")
+    assert is_content_only("It's 7 in the morning on March 16, 1939.")
+    assert ad_cut_window(59.4, 61.4, "It is July the 1st, 1936.") is None
+
+
+def test_thats_next_time_is_content_only() -> None:
+    assert is_content_only("That's next time.")
+    assert ad_cut_window(2989.7, 2990.7, "That's next time.") is None
