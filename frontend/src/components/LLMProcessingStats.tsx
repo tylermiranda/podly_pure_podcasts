@@ -580,7 +580,7 @@ export default function LLMProcessingStats({
                 segments={stats.transcript_segments || []}
                 adBlocks={stats.processing_stats?.ad_blocks || []}
                 corrections={stats.corrections || []}
-                suggestedPromptSnippet={stats.suggested_prompt_snippet || null}
+                suggestedPrompt={stats.suggested_prompt || null}
                 existingPrompt={stats.custom_llm_ad_prompt || null}
               />
             )}

@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest import mock
 
@@ -11,6 +12,7 @@ from app.models import (
     TranscriptSegment,
 )
 from app.routes.post_routes import post_bp
+from app.routes.post_stats_utils import cut_eligible_identifications, final_cut_windows
 from app.writer.actions.cleanup import (
     clear_post_processing_data_action,
     clear_post_processing_data_keep_transcript_action,
@@ -18,9 +20,11 @@ from app.writer.actions.cleanup import (
 from app.writer.actions.processor import insert_ad_correction_action
 from podcast_processor.ad_corrections import (
     format_correction_examples_prompt,
+    processed_audio_needs_recut,
     retrieve_correction_examples,
     snap_range_to_words,
     suggested_prompt_snippet,
+    suggested_prompt_status,
 )
 from podcast_processor.ad_spans import apply_corrections_to_windows
 from podcast_processor.podcast_processor import PodcastProcessor
@@ -518,3 +522,205 @@ def test_suggested_prompt_snippet_requires_repeats(app) -> None:
         assert snippet is not None
         assert "CONTENT" in snippet
         assert "It is July" in snippet
+
+
+def test_suggested_prompt_status_progress(app) -> None:
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-promo-progress",
+            rss_url="https://example.com/corr-promo-p.xml",
+        )
+        for index in range(2):
+            db.session.add(
+                AdCorrection(
+                    post_id=post.id,
+                    feed_id=feed.id,
+                    kind="false_positive",
+                    label="content",
+                    start_time=59.4 + index,
+                    end_time=61.4 + index,
+                    example_text="It is July the 1st, 1936.",
+                    stale=False,
+                )
+            )
+        db.session.commit()
+        status = suggested_prompt_status(feed_id=feed.id)
+        assert status["repeat_count"] == 2
+        assert status["min_repeats"] == 3
+        assert status["snippet"] is None
+
+
+def test_suggested_prompt_status_hides_when_already_appended(app) -> None:
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-promo-done",
+            rss_url="https://example.com/corr-promo-done.xml",
+        )
+        for index in range(3):
+            db.session.add(
+                AdCorrection(
+                    post_id=post.id,
+                    feed_id=feed.id,
+                    kind="false_positive",
+                    label="content",
+                    start_time=59.4 + index,
+                    end_time=61.4 + index,
+                    example_text="It is July the 1st, 1936.",
+                    stale=False,
+                )
+            )
+        db.session.commit()
+        ready = suggested_prompt_status(feed_id=feed.id)
+        assert ready["snippet"] is not None
+        feed.custom_llm_ad_prompt = ready["snippet"]
+        db.session.commit()
+        hidden = suggested_prompt_status(
+            feed_id=feed.id,
+            existing_prompt=feed.custom_llm_ad_prompt,
+        )
+        assert hidden["repeat_count"] == 3
+        assert hidden["snippet"] is None
+
+
+def test_processed_audio_needs_recut_when_correction_is_newer(app, tmp_path) -> None:
+    import os
+
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-needs-recut",
+            rss_url="https://example.com/corr-needs-recut.xml",
+        )
+        processed = tmp_path / "processed.mp3"
+        processed.write_bytes(b"processed")
+        old_mtime = 1_000_000_000.0
+        os.utime(processed, (old_mtime, old_mtime))
+        post.processed_audio_path = str(processed)
+        db.session.add(post)
+        db.session.add(
+            AdCorrection(
+                post_id=post.id,
+                feed_id=feed.id,
+                kind="missed_ad",
+                label="ad",
+                start_time=1.0,
+                end_time=3.0,
+                example_text="buy our sponsor",
+                stale=False,
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        db.session.commit()
+        assert processed_audio_needs_recut(post) is True
+
+
+def test_processed_audio_needs_recut_false_when_file_is_fresh(app, tmp_path) -> None:
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-fresh-recut",
+            rss_url="https://example.com/corr-fresh-recut.xml",
+        )
+        processed = tmp_path / "processed.mp3"
+        processed.write_bytes(b"processed")
+        post.processed_audio_path = str(processed)
+        db.session.add(post)
+        db.session.add(
+            AdCorrection(
+                post_id=post.id,
+                feed_id=feed.id,
+                kind="missed_ad",
+                label="ad",
+                start_time=1.0,
+                end_time=3.0,
+                example_text="buy our sponsor",
+                stale=False,
+                created_at=datetime.fromtimestamp(1_000_000_000, tz=UTC).replace(
+                    tzinfo=None
+                ),
+            )
+        )
+        db.session.commit()
+        assert processed_audio_needs_recut(post) is False
+
+
+def test_stats_includes_suggested_prompt_and_needs_recut(app, tmp_path) -> None:
+    import os
+
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-stats-prompt",
+            rss_url="https://example.com/corr-stats-prompt.xml",
+        )
+        processed = tmp_path / "processed.mp3"
+        processed.write_bytes(b"processed")
+        old_mtime = 1_000_000_000.0
+        os.utime(processed, (old_mtime, old_mtime))
+        post.processed_audio_path = str(processed)
+        for index in range(3):
+            db.session.add(
+                AdCorrection(
+                    post_id=post.id,
+                    feed_id=feed.id,
+                    kind="false_positive",
+                    label="content",
+                    start_time=59.4 + index,
+                    end_time=61.4 + index,
+                    example_text="It is July the 1st, 1936.",
+                    stale=False,
+                )
+            )
+        db.session.commit()
+        guid = post.guid
+
+    client = app.test_client()
+    response = client.get(f"/api/posts/{guid}/stats")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["suggested_prompt"]["repeat_count"] == 3
+    assert payload["suggested_prompt"]["snippet"] is not None
+    assert payload["post"]["needs_recut"] is True
+
+
+def test_cut_eligible_identifications_excludes_low_confidence() -> None:
+    success_call = SimpleNamespace(id=1, status="success")
+    failed_call = SimpleNamespace(id=2, status="failed")
+    high = SimpleNamespace(
+        label="ad",
+        model_call_id=1,
+        confidence=0.95,
+        transcript_segment=SimpleNamespace(
+            start_time=0.0, end_time=5.0, text="sponsor read"
+        ),
+        start_time=0.0,
+        end_time=5.0,
+    )
+    low = SimpleNamespace(
+        label="ad",
+        model_call_id=1,
+        confidence=0.2,
+        transcript_segment=SimpleNamespace(start_time=10.0, end_time=15.0),
+        start_time=10.0,
+        end_time=15.0,
+    )
+    failed = SimpleNamespace(
+        label="ad",
+        model_call_id=2,
+        confidence=0.95,
+        transcript_segment=SimpleNamespace(start_time=20.0, end_time=25.0),
+        start_time=20.0,
+        end_time=25.0,
+    )
+    eligible = cut_eligible_identifications(
+        [high, low, failed],
+        [success_call, failed_call],
+        min_confidence=0.8,
+    )
+    assert eligible == [high]
+    _labeled, effective = final_cut_windows(eligible, [])
+    assert effective == [(0.0, 5.0)]

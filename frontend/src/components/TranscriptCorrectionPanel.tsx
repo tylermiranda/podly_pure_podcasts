@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast';
 import { feedsApi } from '../services/api';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import { getHttpErrorInfo } from '../utils/httpError';
+import type { SuggestedPromptStatus } from '../types';
 
 type CorrectionKind = 'missed_ad' | 'false_positive' | 'retime';
 
@@ -47,7 +48,7 @@ interface TranscriptCorrectionPanelProps {
   segments: TranscriptSegmentRow[];
   adBlocks: AdBlock[];
   corrections: CorrectionRow[];
-  suggestedPromptSnippet: string | null;
+  suggestedPrompt: SuggestedPromptStatus | null;
   existingPrompt: string | null;
 }
 
@@ -116,7 +117,7 @@ export default function TranscriptCorrectionPanel({
   segments,
   adBlocks,
   corrections,
-  suggestedPromptSnippet,
+  suggestedPrompt,
   existingPrompt,
 }: TranscriptCorrectionPanelProps) {
   const queryClient = useQueryClient();
@@ -295,17 +296,31 @@ export default function TranscriptCorrectionPanel({
 
   const acceptSnippetMutation = useMutation({
     mutationFn: async (existingPrompt: string | null) => {
-      if (!suggestedPromptSnippet) return;
+      const snippet = suggestedPrompt?.snippet;
+      if (!snippet) return;
       const existing = existingPrompt?.trim() || '';
       const next = existing
-        ? `${existing}\n\n${suggestedPromptSnippet}`
-        : suggestedPromptSnippet;
+        ? `${existing}\n\n${snippet}`
+        : snippet;
       return feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
     },
     onSuccess: async () => {
+      toast.success('Feed prompt updated');
       await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
+      await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
+    },
+    onError: (err: unknown) => {
+      setError(getHttpErrorInfo(err).message);
     },
   });
+
+  const suggestedSnippet = suggestedPrompt?.snippet ?? null;
+  const promptProgress =
+    suggestedPrompt &&
+    suggestedPrompt.repeat_count > 0 &&
+    suggestedPrompt.repeat_count < suggestedPrompt.min_repeats
+      ? suggestedPrompt
+      : null;
 
   const originalAudioUrl = hasUnprocessedAudio
     ? feedsApi.getPostOriginalAudioUrl(episodeGuid)
@@ -353,7 +368,16 @@ export default function TranscriptCorrectionPanel({
             {corrections.length > 0 && (
               <p className="text-sm text-indigo-800 mb-3">
                 {corrections.length} correction{corrections.length === 1 ? '' : 's'} saved — click
-                Recut audio to update the episode.
+                Recut audio to update the episode. The main player still plays the old MP3 until
+                you recut.
+              </p>
+            )}
+            {promptProgress && (
+              <p className="text-sm text-indigo-800 mb-3">
+                {promptProgress.repeat_count} similar correction
+                {promptProgress.repeat_count === 1 ? '' : 's'} on this feed —{' '}
+                {promptProgress.min_repeats - promptProgress.repeat_count} more unlocks a feed
+                prompt suggestion for future episodes.
               </p>
             )}
             <div className="flex flex-wrap items-end gap-3">
@@ -453,17 +477,20 @@ export default function TranscriptCorrectionPanel({
           </div>
         )}
 
-        {suggestedPromptSnippet && canEdit && (
+        {suggestedSnippet && canEdit && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
             <p className="text-sm font-medium text-amber-900 mb-1">Suggested feed prompt</p>
-            <p className="text-sm text-amber-800 mb-2">{suggestedPromptSnippet}</p>
+            <p className="text-sm text-amber-800 mb-2">
+              Append to teach the LLM permanently for future episodes of this feed.
+            </p>
+            <p className="text-sm text-amber-800 mb-2">{suggestedSnippet}</p>
             <button
               type="button"
               onClick={() => acceptSnippetMutation.mutate(existingPrompt)}
               disabled={acceptSnippetMutation.isPending}
               className="rounded bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
             >
-              Append to feed prompt
+              {acceptSnippetMutation.isPending ? 'Appending…' : 'Append to feed prompt'}
             </button>
           </div>
         )}

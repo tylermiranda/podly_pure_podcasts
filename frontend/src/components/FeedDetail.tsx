@@ -1210,10 +1210,14 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                         </div>
 
                         {episode.has_processed_audio && (
-                          <PlayButton
-                            episode={episode}
-                            className="ml-auto shrink-0"
-                          />
+                          <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
+                            {episode.needs_recut && (
+                              <p className="max-w-xs text-right text-xs text-amber-700">
+                                Saved corrections not applied — Recut in Stats → Transcript.
+                              </p>
+                            )}
+                            <PlayButton episode={episode} />
+                          </div>
                         )}
                       </div>
                     )}

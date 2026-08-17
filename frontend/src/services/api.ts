@@ -297,6 +297,7 @@ export const feedsApi = {
       whitelisted: boolean;
       has_processed_audio: boolean;
       has_unprocessed_audio?: boolean;
+      needs_recut?: boolean;
     };
     ad_detection_strategy: 'llm' | 'chapter' | 'chapter_insert';
     processing_stats: {
@@ -428,7 +429,12 @@ export const feedsApi = {
       transcript_model_call_id: number | null;
       created_at: string | null;
     }>;
-    suggested_prompt_snippet?: string | null;
+    suggested_prompt?: {
+      snippet: string | null;
+      repeat_count: number;
+      min_repeats: number;
+      label: 'ad' | 'content' | null;
+    };
     custom_llm_ad_prompt?: string | null;
   }> => {
     const response = await api.get(`/api/posts/${guid}/stats`);

@@ -1,3 +1,4 @@
+import { toast } from 'react-hot-toast';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import type { Episode } from '../types';
 
@@ -18,17 +19,14 @@ const PauseIcon = ({ className }: { className: string }) => (
   </svg>
 );
 
+const NEEDS_RECUT_MESSAGE =
+  'Saved corrections are not in the MP3 yet — open Stats → Transcript and click Recut audio.';
+
 export default function PlayButton({ episode, className = '' }: PlayButtonProps) {
   const { currentEpisode, isPlaying, isLoading, playEpisode, togglePlayPause } = useAudioPlayer();
-  
+
   const isCurrentEpisode = currentEpisode?.id === episode.id;
   const canPlay = episode.has_processed_audio;
-
-  console.log(`PlayButton for "${episode.title}":`, {
-    has_processed_audio: episode.has_processed_audio,
-    whitelisted: episode.whitelisted,
-    canPlay
-  });
 
   const getDisabledReason = () => {
     if (!episode.has_processed_audio) {
@@ -37,37 +35,42 @@ export default function PlayButton({ episode, className = '' }: PlayButtonProps)
     return '';
   };
 
-  const handleClick = () => {
-    console.log('PlayButton clicked for episode:', episode.title);
-    console.log('canPlay:', canPlay);
-    console.log('isCurrentEpisode:', isCurrentEpisode);
-    
-    if (!canPlay) return;
-    
-    if (isCurrentEpisode) {
-      console.log('Toggling play/pause for current episode');
-      togglePlayPause();
-    } else {
-      console.log('Playing new episode');
-      playEpisode(episode);
+  const warnIfNeedsRecut = () => {
+    if (episode.needs_recut) {
+      toast(NEEDS_RECUT_MESSAGE, { icon: '⚠️' });
     }
+  };
+
+  const handleClick = () => {
+    if (!canPlay) return;
+
+    if (isCurrentEpisode) {
+      warnIfNeedsRecut();
+      togglePlayPause();
+      return;
+    }
+
+    warnIfNeedsRecut();
+    playEpisode(episode);
   };
 
   const isDisabled = !canPlay || (isLoading && isCurrentEpisode);
   const disabledReason = getDisabledReason();
-  const title = isDisabled && disabledReason 
-    ? disabledReason 
-    : isCurrentEpisode 
-      ? (isPlaying ? 'Pause' : 'Play') 
-      : 'Play episode';
+  const title = isDisabled && disabledReason
+    ? disabledReason
+    : episode.needs_recut
+      ? NEEDS_RECUT_MESSAGE
+      : isCurrentEpisode
+        ? (isPlaying ? 'Pause' : 'Play')
+        : 'Play episode';
 
   return (
     <button
       onClick={handleClick}
       disabled={isDisabled}
       className={`p-2 rounded-full transition-colors ${
-        isDisabled 
-          ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+        isDisabled
+          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
           : 'bg-blue-600 text-white hover:bg-blue-700'
       } ${className}`}
       title={title}
@@ -81,4 +84,4 @@ export default function PlayButton({ episode, className = '' }: PlayButtonProps)
       )}
     </button>
   );
-} 
+}

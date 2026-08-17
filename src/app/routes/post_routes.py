@@ -29,6 +29,7 @@ from app.posts import (
 from app.routes.post_stats_utils import (
     count_model_calls,
     count_primary_labels,
+    cut_eligible_identifications,
     final_cut_windows,
     group_identifications_by_segment,
     is_mixed_segment,
@@ -45,12 +46,70 @@ from podcast_processor.chapter_filter import parse_filter_strings
 from podcast_processor.transcription_manager import TranscriptionManager
 from shared import defaults as DEFAULTS
 from shared.processing_paths import (
+    find_existing_processed_audio_path,
     get_in_root,
     get_processed_audio_path_candidates,
     get_srv_root,
 )
 
 logger = logging.getLogger("global_logger")
+
+
+def _post_needs_recut(post: Post) -> bool:
+    from podcast_processor.ad_corrections import processed_audio_needs_recut
+
+    if post.processed_audio_path is None:
+        return False
+    return processed_audio_needs_recut(post)
+
+
+def _serve_processed_audio_file(post: Post, p_guid: str) -> ResponseReturnValue:
+    """Resolve and stream the processed MP3 for a post."""
+    feed = db.session.get(Feed, post.feed_id)
+    processed_path = find_existing_processed_audio_path(
+        processed_audio_path=post.processed_audio_path,
+        unprocessed_audio_path=post.unprocessed_audio_path,
+        feed_title=feed.title if feed else None,
+        post_title=post.title,
+    )
+    if processed_path is None:
+        return missing_processed_audio_response(post, p_guid)
+
+    resolved = str(processed_path.resolve())
+    if post.processed_audio_path != resolved:
+        try:
+            writer_client.update(
+                "Post",
+                post.id,
+                {"processed_audio_path": resolved},
+                wait=False,
+            )
+            post.processed_audio_path = resolved
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Could not repair processed_audio_path for post %s: %s",
+                post.id,
+                exc,
+            )
+
+    try:
+        response = send_file(
+            path_or_file=processed_path,
+            mimetype="audio/mpeg",
+            as_attachment=False,
+            conditional=True,
+        )
+        response.headers["Accept-Ranges"] = "bytes"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Error serving audio file for {p_guid}: {e}")
+        return flask.make_response(
+            jsonify(
+                {"error": "Error serving audio file", "error_code": "SERVER_ERROR"}
+            ),
+            500,
+        )
 
 
 post_bp = Blueprint("post", __name__)
@@ -164,6 +223,7 @@ def api_feed_posts(feed_id: int) -> flask.Response:
             "whitelisted": post.whitelisted,
             "has_processed_audio": post.processed_audio_path is not None,
             "has_unprocessed_audio": post.unprocessed_audio_path is not None,
+            "needs_recut": _post_needs_recut(post),
             "download_url": post.download_url,
             "image_url": post.image_url,
             "download_count": post.download_count,
@@ -417,6 +477,13 @@ def api_post_stats(p_guid: str) -> flask.Response:
         .all()
     )
 
+    min_confidence = float(runtime_config.output.min_confidence)
+    cut_identifications = cut_eligible_identifications(
+        identifications,
+        model_calls,
+        min_confidence=min_confidence,
+    )
+
     model_call_statuses: dict[str, int] = {}
     model_types: dict[str, int] = {}
 
@@ -429,7 +496,7 @@ def api_post_stats(p_guid: str) -> flask.Response:
             model_types[call.model_name] = 0
         model_types[call.model_name] += 1
 
-    identifications_by_segment = group_identifications_by_segment(identifications)
+    identifications_by_segment = group_identifications_by_segment(cut_identifications)
     content_segments, ad_segments = count_primary_labels(
         transcript_segments, identifications_by_segment
     )
@@ -555,12 +622,12 @@ def api_post_stats(p_guid: str) -> flask.Response:
     from podcast_processor.ad_corrections import (
         load_active_corrections_for_post,
         serialize_correction,
-        suggested_prompt_snippet,
+        suggested_prompt_status,
     )
 
     active_corrections = load_active_corrections_for_post(post.id)
     labeled_ad_blocks, ad_blocks = final_cut_windows(
-        identifications,
+        cut_identifications,
         transcript_segments,
         refined_windows=refined_windows or None,
         corrections=active_corrections,
@@ -581,6 +648,12 @@ def api_post_stats(p_guid: str) -> flask.Response:
         else 0.0
     )
 
+    custom_llm_ad_prompt = getattr(feed, "custom_llm_ad_prompt", None) if feed else None
+    suggested_prompt = suggested_prompt_status(
+        feed_id=post.feed_id,
+        existing_prompt=custom_llm_ad_prompt,
+    )
+
     stats_data = {
         "post": {
             "guid": post.guid,
@@ -596,6 +669,7 @@ def api_post_stats(p_guid: str) -> flask.Response:
                 post.unprocessed_audio_path
                 and Path(post.unprocessed_audio_path).is_file()
             ),
+            "needs_recut": _post_needs_recut(post),
             "download_count": post.download_count,
         },
         "ad_detection_strategy": ad_detection_strategy,
@@ -630,15 +704,8 @@ def api_post_stats(p_guid: str) -> flask.Response:
         "identifications": identifications_data,
         "chapters": chapters_data,
         "corrections": [serialize_correction(row) for row in active_corrections],
-        "suggested_prompt_snippet": suggested_prompt_snippet(
-            feed_id=post.feed_id,
-            existing_prompt=(
-                getattr(feed, "custom_llm_ad_prompt", None) if feed else None
-            ),
-        ),
-        "custom_llm_ad_prompt": (
-            getattr(feed, "custom_llm_ad_prompt", None) if feed else None
-        ),
+        "suggested_prompt": suggested_prompt,
+        "custom_llm_ad_prompt": custom_llm_ad_prompt,
     }
 
     if _env_bool("PODLY_STATS_DEBUG", default=False):
@@ -1299,26 +1366,7 @@ def api_get_post_audio(p_guid: str) -> ResponseReturnValue:
     if whitelist_response:
         return whitelist_response
 
-    if not post.processed_audio_path or not Path(post.processed_audio_path).exists():
-        return missing_processed_audio_response(post, p_guid)
-
-    try:
-        response = send_file(
-            path_or_file=Path(post.processed_audio_path).resolve(),
-            mimetype="audio/mpeg",
-            as_attachment=False,
-            conditional=True,
-        )
-        response.headers["Accept-Ranges"] = "bytes"
-        return response
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Error serving audio file for {p_guid}: {e}")
-        return flask.make_response(
-            jsonify(
-                {"error": "Error serving audio file", "error_code": "SERVER_ERROR"}
-            ),
-            500,
-        )
+    return _serve_processed_audio_file(post, p_guid)
 
 
 @post_bp.route("/api/posts/<string:p_guid>/audio/original", methods=["GET"])

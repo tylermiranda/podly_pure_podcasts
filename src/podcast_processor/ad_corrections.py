@@ -241,12 +241,12 @@ def format_correction_examples_prompt(examples: list[AdCorrection]) -> str:
     return "\n".join(lines)
 
 
-def suggested_prompt_snippet(
+def suggested_prompt_status(
     *,
     feed_id: int,
     existing_prompt: str | None = None,
     min_repeats: int = PROMOTION_MIN_REPEATS,
-) -> str | None:
+) -> dict[str, Any]:
     corrections = active_corrections_query(feed_ids=[feed_id]).all()
     counts: dict[str, list[AdCorrection]] = {}
     for correction in corrections:
@@ -256,30 +256,83 @@ def suggested_prompt_snippet(
         counts.setdefault(key, []).append(correction)
     best: list[AdCorrection] | None = None
     for group in counts.values():
-        if len(group) < min_repeats:
-            continue
         if best is None or len(group) > len(best):
             best = group
-    if not best:
-        return None
-    sample = best[0]
-    snippet = (sample.example_text or "").strip()
-    if len(snippet) > 140:
-        snippet = snippet[:137].rstrip() + "..."
-    if sample.label == "content":
-        suggestion = (
-            f'Treat lines like "{snippet}" as CONTENT, not ads. '
-            "Do not cut date cold-opens or narrative resumes."
-        )
-    else:
-        suggestion = (
-            f'Cut sponsor reads matching "{snippet}". '
-            "Keep the surrounding show content."
-        )
-    existing = (existing_prompt or "").strip()
-    if existing and suggestion in existing:
-        return None
-    return suggestion
+    repeat_count = len(best) if best else 0
+    label = best[0].label if best else None
+    snippet: str | None = None
+    if best and len(best) >= min_repeats:
+        sample = best[0]
+        example = (sample.example_text or "").strip()
+        if example:
+            if len(example) > 140:
+                example = example[:137].rstrip() + "..."
+            if sample.label == "content":
+                suggestion = (
+                    f'Treat lines like "{example}" as CONTENT, not ads. '
+                    "Do not cut date cold-opens or narrative resumes."
+                )
+            else:
+                suggestion = (
+                    f'Cut sponsor reads matching "{example}". '
+                    "Keep the surrounding show content."
+                )
+            existing = (existing_prompt or "").strip()
+            if not (existing and suggestion in existing):
+                snippet = suggestion
+    return {
+        "snippet": snippet,
+        "repeat_count": repeat_count,
+        "min_repeats": min_repeats,
+        "label": label,
+    }
+
+
+def suggested_prompt_snippet(
+    *,
+    feed_id: int,
+    existing_prompt: str | None = None,
+    min_repeats: int = PROMOTION_MIN_REPEATS,
+) -> str | None:
+    return suggested_prompt_status(
+        feed_id=feed_id,
+        existing_prompt=existing_prompt,
+        min_repeats=min_repeats,
+    ).get("snippet")
+
+
+def processed_audio_needs_recut(post: Post) -> bool:
+    """True when saved corrections are newer than the processed MP3 on disk."""
+    corrections = load_active_corrections_for_post(post.id)
+    if not corrections:
+        return False
+
+    from shared.processing_paths import find_existing_processed_audio_path
+
+    feed = getattr(post, "feed", None)
+    feed_title = getattr(feed, "title", None) if feed is not None else None
+    processed_path = find_existing_processed_audio_path(
+        processed_audio_path=post.processed_audio_path,
+        unprocessed_audio_path=post.unprocessed_audio_path,
+        feed_title=feed_title,
+        post_title=post.title,
+    )
+    if processed_path is None:
+        return True
+
+    latest = max(
+        corrections,
+        key=lambda row: row.created_at.timestamp() if row.created_at else 0.0,
+    )
+    if latest.created_at is None:
+        return True
+
+    try:
+        file_mtime = processed_path.stat().st_mtime
+    except OSError:
+        return True
+
+    return latest.created_at.timestamp() > file_mtime
 
 
 def apply_post_corrections(

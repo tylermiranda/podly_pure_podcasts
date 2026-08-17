@@ -52,9 +52,17 @@ export interface Episode {
   whitelisted: boolean;
   has_processed_audio: boolean;
   has_unprocessed_audio: boolean;
+  needs_recut?: boolean;
   download_url: string;
   image_url: string | null;
   download_count: number;
+}
+
+export interface SuggestedPromptStatus {
+  snippet: string | null;
+  repeat_count: number;
+  min_repeats: number;
+  label: 'ad' | 'content' | null;
 }
 
 export interface PagedResult<T> {

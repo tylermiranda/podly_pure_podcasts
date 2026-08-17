@@ -109,6 +109,32 @@ def merge_time_windows(
     return merged
 
 
+def cut_eligible_identifications(
+    identifications: Iterable[Any],
+    model_calls: Iterable[Any],
+    *,
+    min_confidence: float,
+) -> list[Any]:
+    """Identifications that match AudioProcessor.get_ad_segments filters."""
+    success_call_ids = {
+        int(call.id)
+        for call in model_calls
+        if getattr(call, "status", None) == "success" and getattr(call, "id", None)
+    }
+    eligible: list[Any] = []
+    for ident in identifications:
+        if getattr(ident, "label", None) != "ad":
+            continue
+        model_call_id = getattr(ident, "model_call_id", None)
+        if model_call_id is None or int(model_call_id) not in success_call_ids:
+            continue
+        confidence = getattr(ident, "confidence", None)
+        if confidence is not None and float(confidence) < min_confidence:
+            continue
+        eligible.append(ident)
+    return eligible
+
+
 def labeled_cut_windows(
     identifications: Iterable[Any],
 ) -> list[tuple[float, float]]:
