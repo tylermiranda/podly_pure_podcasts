@@ -13,6 +13,37 @@ from sqlalchemy.orm import Session, scoped_session
 SessionType = Session | scoped_session[Any]
 
 
+def refresh_read_snapshot(
+    session: SessionType,
+    logger: logging.Logger | None = None,
+    context: str = "refresh_read_snapshot",
+) -> None:
+    """End the current read transaction so other connections' commits are visible.
+
+    SQLite WAL freezes a snapshot until rollback/commit. Processor jobs query
+    identifications the writer process just inserted; ``expire_all()`` alone
+    does not end that snapshot. Does not ``session.remove()`` — the job must
+    keep its scoped session.
+    """
+    log = logger or logging.getLogger("global_logger")
+    try:
+        session.rollback()
+    except Exception as rb_exc:  # noqa: BLE001
+        log.warning(
+            "[SESSION_REFRESH] rollback failed in context=%s: %s", context, rb_exc
+        )
+    expire = getattr(session, "expire_all", None)
+    if callable(expire):
+        try:
+            expire()
+        except Exception as exp_exc:  # noqa: BLE001
+            log.warning(
+                "[SESSION_REFRESH] expire_all failed in context=%s: %s",
+                context,
+                exp_exc,
+            )
+
+
 def reset_session(
     session: SessionType,
     logger: logging.Logger,

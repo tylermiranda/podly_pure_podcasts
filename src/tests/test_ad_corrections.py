@@ -59,6 +59,15 @@ def test_apply_corrections_punches_content_and_inserts_ad() -> None:
     ]
 
 
+def test_later_ad_correction_overrides_earlier_content_hole() -> None:
+    windows: list[tuple[float, float]] = []
+    corrections = [
+        SimpleNamespace(id=39, label="content", start_time=0.2, end_time=58.7),
+        SimpleNamespace(id=44, label="ad", start_time=0.2, end_time=58.7),
+    ]
+    assert apply_corrections_to_windows(windows, corrections) == [(0.2, 58.7)]
+
+
 def test_snap_range_to_words() -> None:
     segment = SimpleNamespace(
         words=[

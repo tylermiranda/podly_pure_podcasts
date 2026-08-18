@@ -1,11 +1,15 @@
 import logging
+import sqlite3
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from flask import Flask
 
 from app.extensions import db
-from app.models import Feed, Identification, Post, TranscriptSegment
+from app.models import Feed, Identification, ModelCall, Post, TranscriptSegment
+from app.routes.post_stats_utils import cut_eligible_identifications, final_cut_windows
+from podcast_processor.ad_merger import AdGroup, AdMerger
 from podcast_processor.audio_processor import AudioProcessor
 from shared.config import Config
 from shared.test_utils import create_standard_test_config
@@ -352,3 +356,177 @@ def test_process_audio(
             # it is within the minimum separation threshold of the episode end.
             assert removed_segments == [(5000, 30000)]
             mock_clip.assert_called_once()
+
+
+GROW_PREROLL_ROWS: list[tuple[int, float, float, str, bool]] = [
+    (0, 0.2, 2.3, "Summer's supposed to be the easy season.", False),
+    (
+        1,
+        2.7,
+        7.4,
+        "So why are so many people quietly Googling a therapist between summer Fridays?",
+        False,
+    ),
+    (2, 7.6, 10.1, "Because more daylight doesn't fix the hard stuff.", False),
+    (3, 10.4, 12.2, "Sometimes it just turns the volume up.", False),
+    (4, 12.4, 13.9, "Grow does therapy differently.", False),
+    (
+        5,
+        14.2,
+        23.1,
+        "Grow connects you with thousands of high-quality, licensed therapists across the U.S.",
+        True,
+    ),
+    (
+        6,
+        23.3,
+        26.1,
+        "There are no subscriptions, no long-term commitments.",
+        False,
+    ),
+    (
+        7,
+        26.5,
+        30.0,
+        "It is August 18, 2026, in a packed Las Vegas courtroom.",
+        False,
+    ),
+]
+
+
+def persist_grow_preroll_episode(db_session, *, guid: str = "grow-preroll-guid"):
+    feed = Feed(title="History of the 90s", rss_url=f"https://example.com/{guid}.rss")
+    db_session.add(feed)
+    db_session.commit()
+    post = Post(
+        feed_id=feed.id,
+        guid=guid,
+        download_url=f"https://example.com/{guid}.mp3",
+        title="The Tupac Murder Trial",
+        unprocessed_audio_path="/tmp/grow.mp3",
+        whitelisted=True,
+    )
+    db_session.add(post)
+    db_session.commit()
+
+    segments = []
+    for sequence_num, start, end, body, _labeled in GROW_PREROLL_ROWS:
+        row = TranscriptSegment(
+            post_id=post.id,
+            sequence_num=sequence_num,
+            start_time=start,
+            end_time=end,
+            text=body,
+        )
+        segments.append(row)
+    db_session.add_all(segments)
+    db_session.commit()
+
+    model_call = ModelCall(
+        post_id=post.id,
+        model_name="test-model",
+        first_segment_sequence_num=0,
+        last_segment_sequence_num=GROW_PREROLL_ROWS[-1][0],
+        prompt="classify",
+        response='{"ad_segments":[]}',
+        status="success",
+    )
+    db_session.add(model_call)
+    db_session.commit()
+
+    cta = next(
+        row for row, spec in zip(segments, GROW_PREROLL_ROWS, strict=True) if spec[4]
+    )
+    db_session.add(
+        Identification(
+            transcript_segment_id=cta.id,
+            model_call_id=model_call.id,
+            label="ad",
+            confidence=0.85,
+        )
+    )
+    db_session.commit()
+    return post, segments
+
+
+def test_ad_merger_drops_weak_grow_cta_group() -> None:
+    """Regression: AdMerger used to drop this group before expand, hiding it from ffmpeg."""
+    merger = AdMerger()
+    group = AdGroup(
+        segments=[],
+        identifications=[],
+        start_time=14.2,
+        end_time=23.1,
+        confidence_avg=0.85,
+        keywords=[],
+    )
+    assert merger._is_valid_group(group) is False
+
+
+def test_get_ad_segments_keeps_grow_preroll_matching_stats(app: Flask) -> None:
+    with app.app_context():
+        post, _segments = persist_grow_preroll_episode(db.session)
+        processor = AudioProcessor(config=create_standard_test_config())
+        windows = processor.get_ad_segments(post)
+
+        identifications = (
+            Identification.query.join(TranscriptSegment)
+            .filter(TranscriptSegment.post_id == post.id)
+            .all()
+        )
+        model_calls = ModelCall.query.filter_by(post_id=post.id).all()
+        eligible = cut_eligible_identifications(
+            identifications, model_calls, min_confidence=0.7
+        )
+        _labeled, stats_blocks = final_cut_windows(eligible, post.segments.all())
+
+    assert windows == stats_blocks
+    assert len(windows) == 1
+    start, end = windows[0]
+    assert start == pytest.approx(0.2, abs=0.05)
+    assert end == pytest.approx(26.1, abs=0.05)
+
+
+def test_merge_ad_segments_keeps_grow_preroll_at_legacy_min_length(
+    test_processor_with_mocks: AudioProcessor,
+) -> None:
+    window = [(0.2, 26.1)]
+    for min_length in (5.0, 14.0):
+        merged = test_processor_with_mocks.merge_ad_segments(
+            duration_ms=900000,
+            ad_segments=window,
+            min_ad_segment_length_seconds=min_length,
+            min_ad_segment_separation_seconds=60.0,
+        )
+        assert merged == [(200, 26100)]
+
+
+def test_sqlite_wal_snapshot_hides_inserts_until_rollback(tmp_path: Path) -> None:
+    """SQLite WAL readers miss other-connection commits until rollback/commit."""
+    db_path = tmp_path / "wal_snapshot.sqlite"
+    bootstrap = sqlite3.connect(str(db_path))
+    bootstrap.execute("PRAGMA journal_mode=WAL")
+    bootstrap.execute(
+        "CREATE TABLE identification (id INTEGER PRIMARY KEY, label TEXT)"
+    )
+    bootstrap.commit()
+    bootstrap.close()
+
+    reader = sqlite3.connect(str(db_path))
+    reader.isolation_level = "DEFERRED"
+    try:
+        reader.execute("BEGIN")
+        assert reader.execute("SELECT COUNT(*) FROM identification").fetchone()[0] == 0
+
+        writer_conn = sqlite3.connect(str(db_path))
+        try:
+            writer_conn.execute("INSERT INTO identification (label) VALUES ('ad')")
+            writer_conn.commit()
+        finally:
+            writer_conn.close()
+
+        assert reader.execute("SELECT COUNT(*) FROM identification").fetchone()[0] == 0
+        reader.rollback()
+        assert reader.execute("SELECT COUNT(*) FROM identification").fetchone()[0] == 1
+    finally:
+        reader.close()

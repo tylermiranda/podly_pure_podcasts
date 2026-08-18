@@ -11,6 +11,7 @@ import litellm
 from jinja2 import Template
 from sqlalchemy.orm import object_session
 
+from app.db_guard import refresh_read_snapshot
 from app.extensions import db
 from app.models import Post, ProcessingJob, TranscriptSegment
 from app.writer.client import writer_client
@@ -441,6 +442,11 @@ class PodcastProcessor:
         # Step 3: Classify ad segments
         self._classify_ad_segments(post, job, transcript_segments)
         self._raise_if_cancelled(job, 3, cancel_callback)
+        # Writer committed identifications on another connection. End this
+        # session's SQLite WAL snapshot so process_audio can see those rows.
+        session = getattr(self, "db_session", None)
+        if session is not None:
+            refresh_read_snapshot(session, self.logger, "after_classify")
 
         # Step 4: Process audio (remove ad segments)
         self.status_manager.update_job_status(

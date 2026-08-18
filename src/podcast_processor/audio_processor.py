@@ -1,17 +1,11 @@
 import logging
 from typing import Any
 
+from app.db_guard import refresh_read_snapshot
 from app.extensions import db
 from app.models import Identification, ModelCall, Post, TranscriptSegment
 from app.writer.client import writer_client
-from podcast_processor.ad_merger import AdMerger
-from podcast_processor.ad_spans import (
-    AD_MERGE_PROXIMITY_SECONDS,
-    apply_corrections_to_windows,
-    content_bounds_from_corrections,
-    expand_cut_windows,
-    identification_cut_window,
-)
+from podcast_processor.ad_spans import AD_MERGE_PROXIMITY_SECONDS
 from podcast_processor.audio import clip_segments_with_fade, get_audio_duration_ms
 from shared.config import Config
 
@@ -37,31 +31,78 @@ class AudioProcessor:
         )
         self.model_call_query = model_call_query or ModelCall.query
         self.db_session = db_session or db.session
-        self.ad_merger = AdMerger()
 
     def get_ad_segments(self, post: Post) -> list[tuple[float, float]]:
-        """
-        Retrieves ad segments from the database for a given post.
-
-        NOTE: Uses self.db_session.query() instead of self.identification_query
-        to ensure all operations use the same session consistently.
-
-        Args:
-            post: The Post object to retrieve ad segments for
-
-        Returns:
-            A list of tuples containing start and end times (in seconds) of ad segments
-        """
-        self.logger.info(f"Retrieving ad segments from database for post {post.id}.")
-
-        query = (
-            self.identification_query
-            if self._identification_query_provided
-            else self.db_session.query(Identification)
+        """Return expanded cut windows using the same path as Stats Cut pills."""
+        from app.routes.post_stats_utils import (
+            cut_eligible_identifications,
+            final_cut_windows,
+            parse_refined_windows,
         )
 
-        ad_identifications = (
-            query.join(
+        self.logger.info(f"Retrieving ad segments from database for post {post.id}.")
+        identifications, transcript_segments, model_calls = self._load_cut_inputs(post)
+        if self._identification_query_provided:
+            eligible = identifications
+        else:
+            eligible = cut_eligible_identifications(
+                identifications,
+                model_calls,
+                min_confidence=float(self.config.output.min_confidence),
+            )
+
+        corrections = self._corrections_for_post(post)
+        refined_windows = parse_refined_windows(
+            getattr(post, "refined_ad_boundaries", None)
+        )
+        _labeled, effective = final_cut_windows(
+            eligible,
+            transcript_segments,
+            refined_windows=refined_windows or None,
+            corrections=corrections,
+        )
+        self.logger.info(
+            "Resolved %s eligible ad labels into %s cut windows for post %s",
+            len(eligible),
+            len(effective),
+            post.id,
+        )
+        return effective
+
+    def _load_cut_inputs(self, post: Post) -> tuple[list[Any], list[Any], list[Any]]:
+        if self._identification_query_provided:
+            identifications = self._identifications_from_injected_query(post)
+            fallback_segments = [
+                ident.transcript_segment
+                for ident in identifications
+                if getattr(ident, "transcript_segment", None) is not None
+            ]
+            return identifications, fallback_segments, []
+
+        refresh_read_snapshot(self.db_session, self.logger, "get_ad_segments")
+        identifications = (
+            self.db_session.query(Identification)
+            .join(
+                TranscriptSegment,
+                Identification.transcript_segment_id == TranscriptSegment.id,
+            )
+            .filter(TranscriptSegment.post_id == post.id)
+            .all()
+        )
+        transcript_segments = (
+            self.db_session.query(TranscriptSegment)
+            .filter(TranscriptSegment.post_id == post.id)
+            .order_by(TranscriptSegment.sequence_num)
+            .all()
+        )
+        model_calls = (
+            self.db_session.query(ModelCall).filter(ModelCall.post_id == post.id).all()
+        )
+        return identifications, transcript_segments, model_calls
+
+    def _identifications_from_injected_query(self, post: Post) -> list[Any]:
+        return (
+            self.identification_query.join(
                 TranscriptSegment,
                 Identification.transcript_segment_id == TranscriptSegment.id,
             )
@@ -70,100 +111,10 @@ class AudioProcessor:
                 TranscriptSegment.post_id == post.id,
                 Identification.label == "ad",
                 Identification.confidence >= self.config.output.min_confidence,
-                ModelCall.status
-                == "success",  # Only consider identifications from successful LLM calls
+                ModelCall.status == "success",
             )
             .all()
         )
-
-        if not ad_identifications:
-            self.logger.info(
-                f"No ad segments found meeting criteria for post {post.id}."
-            )
-            return self._apply_post_corrections(post, [])
-
-        # Get full segment objects with text for content analysis
-        # Filter out any identifications with missing segments (DB integrity check)
-        ad_segments_with_text = []
-        valid_identifications = []
-        for ident in ad_identifications:
-            segment = ident.transcript_segment
-            if not segment:
-                # This should ideally not happen if DB integrity is maintained
-                self.logger.warning(
-                    f"Identification {ident.id} for post {post.id} refers to a missing TranscriptSegment {ident.transcript_segment_id}. Skipping."
-                )
-                continue
-            orig_start = float(segment.start_time or 0.0)
-            orig_end = float(segment.end_time or 0.0)
-            window = identification_cut_window(ident, segment)
-            if window is None:
-                self.logger.info(
-                    "Dropping content-only ad label for post %s segment %s",
-                    post.id,
-                    segment.id,
-                )
-                continue
-            if window != (orig_start, orig_end):
-                cut_segment = TranscriptSegment(
-                    id=segment.id,
-                    post_id=segment.post_id,
-                    sequence_num=segment.sequence_num,
-                    start_time=window[0],
-                    end_time=window[1],
-                    text=segment.text,
-                    words=getattr(segment, "words", None),
-                )
-            else:
-                cut_segment = segment
-            ad_segments_with_text.append(cut_segment)
-            valid_identifications.append(ident)
-
-        if not ad_segments_with_text:
-            self.logger.info(
-                f"No valid ad segments with transcript data for post {post.id}."
-            )
-            return self._apply_post_corrections(post, [])
-
-        # Content-aware merge
-        ad_groups = self.ad_merger.merge(
-            ad_segments=ad_segments_with_text,
-            identifications=valid_identifications,
-            max_gap=AD_MERGE_PROXIMITY_SECONDS,
-            min_content_gap=12.0,
-        )
-
-        # If boundary refinement persisted refined windows on the post, prefer those
-        # refined timestamps for audio cutting (this allows word-level refinement to
-        # affect the actual cut start time).
-        if getattr(self.config, "enable_boundary_refinement", False):
-            self._apply_refined_boundaries(post, ad_groups)
-
-        self.logger.info(
-            f"Merged {len(ad_segments_with_text)} segments into {len(ad_groups)} groups for post {post.id}"
-        )
-
-        # Convert to time tuples for merge_ad_segments()
-        ad_segments_times = [(g.start_time, g.end_time) for g in ad_groups]
-        ad_segments_times.sort(key=lambda x: x[0])
-        transcript_segments = self._transcript_segments_for_post(
-            post, fallback=ad_segments_with_text
-        )
-        corrections = self._corrections_for_post(post)
-        content_bounds = content_bounds_from_corrections(corrections)
-        expanded = expand_cut_windows(
-            ad_segments_times,
-            transcript_segments,
-            content_bounds=content_bounds,
-        )
-        if expanded != ad_segments_times:
-            self.logger.info(
-                "Expanded %s ad windows to %s full-read windows for post %s",
-                len(ad_segments_times),
-                len(expanded),
-                post.id,
-            )
-        return apply_corrections_to_windows(expanded, corrections)
 
     def _corrections_for_post(self, post: Post) -> list[Any]:
         if self._identification_query_provided:
@@ -176,112 +127,6 @@ class AudioProcessor:
             return load_active_corrections_for_post(post.id)
         except Exception:  # noqa: BLE001
             return []
-
-    def _apply_post_corrections(
-        self, post: Post, windows: list[tuple[float, float]]
-    ) -> list[tuple[float, float]]:
-        return apply_corrections_to_windows(windows, self._corrections_for_post(post))
-
-    def _transcript_segments_for_post(
-        self, post: Post, *, fallback: list[TranscriptSegment]
-    ) -> list[TranscriptSegment]:
-        if self._identification_query_provided:
-            return fallback
-        try:
-            rows = (
-                self.db_session.query(TranscriptSegment)
-                .filter(TranscriptSegment.post_id == post.id)
-                .order_by(TranscriptSegment.sequence_num)
-                .all()
-            )
-        except Exception:  # noqa: BLE001
-            return fallback
-        return rows or fallback
-
-    def _apply_refined_boundaries(self, post: Post, ad_groups: Any) -> None:
-        post_row = self._safe_get_post_row(post)
-        refined = getattr(post_row, "refined_ad_boundaries", None) if post_row else None
-        parsed = self._parse_refined_boundaries(refined)
-        if not parsed:
-            return
-
-        for group in ad_groups:
-            overlap_window = self._refined_overlap_window_for_group(group, parsed)
-            if overlap_window is None:
-                continue
-            refined_start_min, refined_end_max = overlap_window
-
-            new_start = max(group.start_time, refined_start_min)
-            new_end = min(group.end_time, refined_end_max)
-            if new_end > new_start:
-                group.start_time = new_start
-                group.end_time = new_end
-
-    def _safe_get_post_row(self, post: Post) -> Post | None:
-        try:
-            return self.db_session.get(Post, post.id)
-        except Exception:  # noqa: BLE001
-            return None
-
-    @staticmethod
-    def _parse_refined_boundaries(
-        refined: Any,
-    ) -> list[tuple[float, float, float, float]]:
-        if not refined or not isinstance(refined, list):
-            return []
-
-        parsed: list[tuple[float, float, float, float]] = []
-        for item in refined:
-            if not isinstance(item, dict):
-                continue
-
-            orig_start_raw = item.get("orig_start")
-            orig_end_raw = item.get("orig_end")
-            refined_start_raw = item.get("refined_start")
-            refined_end_raw = item.get("refined_end")
-            if (
-                orig_start_raw is None
-                or orig_end_raw is None
-                or refined_start_raw is None
-                or refined_end_raw is None
-            ):
-                continue
-
-            try:
-                orig_start = float(orig_start_raw)
-                orig_end = float(orig_end_raw)
-                refined_start = float(refined_start_raw)
-                refined_end = float(refined_end_raw)
-            except Exception:  # noqa: BLE001
-                continue
-
-            if refined_end <= refined_start:
-                continue
-
-            parsed.append((orig_start, orig_end, refined_start, refined_end))
-
-        return parsed
-
-    @staticmethod
-    def _refined_overlap_window_for_group(
-        group: Any,
-        parsed: list[tuple[float, float, float, float]],
-    ) -> tuple[float, float] | None:
-        overlaps: list[tuple[float, float]] = []
-        for orig_start, orig_end, refined_start, refined_end in parsed:
-            overlap = max(
-                0.0,
-                min(group.end_time, orig_end) - max(group.start_time, orig_start),
-            )
-            if overlap > 0.0:
-                overlaps.append((refined_start, refined_end))
-
-        if not overlaps:
-            return None
-
-        refined_start_min = min(s for s, _ in overlaps)
-        refined_end_max = max(e for _, e in overlaps)
-        return refined_start_min, refined_end_max
 
     def merge_ad_segments(
         self,

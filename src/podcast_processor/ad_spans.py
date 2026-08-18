@@ -321,37 +321,62 @@ def _correction_label_window(correction: Any) -> tuple[str, float, float] | None
     return str(label), start, end
 
 
+def _correction_id(correction: Any) -> int | None:
+    if isinstance(correction, dict):
+        raw = correction.get("id")
+    else:
+        raw = getattr(correction, "id", None)
+    try:
+        return int(raw) if raw is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _ordered_corrections(corrections: list[Any] | None) -> list[Any]:
+    """Stable order: original list, or by id when present so later edits win."""
+    items = list(corrections or [])
+    if not items:
+        return []
+    ids = [_correction_id(item) for item in items]
+    if all(item is None for item in ids):
+        return items
+    indexed = list(enumerate(items))
+    indexed.sort(key=lambda pair: (ids[pair[0]] is None, ids[pair[0]] or 0, pair[0]))
+    return [item for _index, item in indexed]
+
+
 def content_bounds_from_corrections(
     corrections: list[Any] | None,
 ) -> list[tuple[float, float]]:
     bounds: list[tuple[float, float]] = []
-    for correction in corrections or []:
+    for correction in _ordered_corrections(corrections):
         parsed = _correction_label_window(correction)
         if parsed is None:
             continue
         label, start, end = parsed
         if label == "content":
-            bounds.append((start, end))
-    return merge_overlapping_windows(bounds)
+            bounds = merge_overlapping_windows([*bounds, (start, end)])
+        else:
+            bounds = subtract_windows(bounds, [(start, end)])
+    return bounds
 
 
 def apply_corrections_to_windows(
     windows: list[tuple[float, float]],
     corrections: list[Any] | None,
 ) -> list[tuple[float, float]]:
-    """Apply human overrides last: content punches holes; ad windows are added."""
-    ads = list(windows)
-    holes: list[tuple[float, float]] = []
-    for correction in corrections or []:
+    """Apply human overrides in id order so a later Cut can undo an earlier Content."""
+    ads = merge_overlapping_windows(windows)
+    for correction in _ordered_corrections(corrections):
         parsed = _correction_label_window(correction)
         if parsed is None:
             continue
         label, start, end = parsed
         if label == "ad":
-            ads.append((start, end))
+            ads = merge_overlapping_windows([*ads, (start, end)])
         else:
-            holes.append((start, end))
-    return subtract_windows(merge_overlapping_windows(ads), holes)
+            ads = subtract_windows(ads, [(start, end)])
+    return ads
 
 
 def _gap_blocks_ad_fill(
