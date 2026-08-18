@@ -1,0 +1,15 @@
+---
+description: After a feature or fix, always start the local stack for manual testing
+alwaysApply: true
+---
+
+# Local verify after implementation
+
+After finishing a feature or bug fix, **always bring up a local copy** for testing. Do not stop at CI, Tower, or a code-only change.
+
+1. Check ports 50001 (writer), 5001 (Flask), and 5174 (Vite). Start anything that is down.
+2. Writer first (`uv run python -m app.writer`), wait until `127.0.0.1:50001` accepts TCP, then Flask (`uv run python src/main.py`), then `cd frontend && npm run dev`.
+3. Use instance dirs on this machine (`PODLY_INSTANCE_DIR` / `PODLY_PODCAST_DATA_DIR` under `src/instance`), `DEVELOPER_MODE=true`, `PYTHONPATH=.../src`, `PODLY_DISABLE_SCHEDULER=1`.
+4. Open **http://127.0.0.1:5174** (not 5173) and exercise the changed UI/flow.
+
+Reuse already-running local processes; do not start duplicates.
