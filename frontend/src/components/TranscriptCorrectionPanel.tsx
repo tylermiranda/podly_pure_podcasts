@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { feedsApi } from '../services/api';
@@ -51,8 +51,6 @@ interface TranscriptCorrectionPanelProps {
   suggestedPrompt: SuggestedPromptStatus | null;
   existingPrompt: string | null;
 }
-
-const CLICK_PIXEL_THRESHOLD = 6;
 
 function contiguousIndexGroups(indexes: Set<number>): number[][] {
   if (indexes.size === 0) return [];
@@ -123,15 +121,8 @@ export default function TranscriptCorrectionPanel({
   const queryClient = useQueryClient();
   const { audioRef: globalAudioRef, reloadProcessedAudio } = useAudioPlayer();
   const originalAudioRef = useRef<HTMLAudioElement>(null);
-  const pointerStart = useRef<{
-    x: number;
-    y: number;
-    index: number;
-    skipPlay?: boolean;
-  } | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
   const [rangeAnchor, setRangeAnchor] = useState<number | null>(null);
-  const [dragging, setDragging] = useState(false);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [kind, setKind] = useState<CorrectionKind>('missed_ad');
@@ -185,21 +176,29 @@ export default function TranscriptCorrectionPanel({
     [pauseGlobalPlayer]
   );
 
-  useEffect(() => {
-    const onUp = (event: MouseEvent) => {
-      const start = pointerStart.current;
-      if (!start) return;
-      pointerStart.current = null;
-      setDragging(false);
-      const dist = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-      if (dist < CLICK_PIXEL_THRESHOLD && !start.skipPlay) {
-        const segment = segments[start.index];
-        if (segment) playFrom(segment.start_time);
-      }
-    };
-    window.addEventListener('mouseup', onUp);
-    return () => window.removeEventListener('mouseup', onUp);
-  }, [playFrom, segments]);
+  const toggleSegmentSelection = useCallback(
+    (index: number, shiftKey: boolean) => {
+      setSelectedIndexes((prev) => {
+        let next: Set<number>;
+        if (shiftKey && rangeAnchor !== null) {
+          next = new Set([...prev, ...rangeIndexes(rangeAnchor, index)]);
+        } else {
+          next = new Set(prev);
+          if (next.has(index)) next.delete(index);
+          else next.add(index);
+        }
+        updateBoundsFromSelection(next);
+        return next;
+      });
+      setRangeAnchor(index);
+    },
+    [rangeAnchor, updateBoundsFromSelection]
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectedIndexes(new Set());
+    setRangeAnchor(null);
+  }, []);
 
   const refreshStatsOnly = async () => {
     await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
@@ -335,8 +334,8 @@ export default function TranscriptCorrectionPanel({
         {originalAudioUrl ? (
           <div className="text-left">
             <p className="mb-2 text-sm text-gray-600">
-              Original audio (with ads). Click a row to play; drag or Shift+click for a range;
-              Cmd/Ctrl+click to select multiple rows.
+              Original audio (with ads). Click a row to play. Check rows to mark them; Shift+click a
+              checkbox to select a range.
             </p>
             <audio
               ref={originalAudioRef}
@@ -356,14 +355,23 @@ export default function TranscriptCorrectionPanel({
         {canEdit && (
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-left">
             <p className="text-sm text-indigo-900 mb-3">
-              Select rows (drag, Shift+click, or Cmd/Ctrl+click for multiple spans), or edit
-              start/end seconds manually, then mark as ad or content while listening to the
-              original audio. Mark ad/content saves each span; click Recut audio once when
-              finished to update the processed MP3. You do not need Reprocess (that re-runs
-              Whisper/LLM). Effective cuts are highlighted in red.
+              Check rows, or Shift+click a checkbox for a range, or edit start/end seconds
+              manually, then mark as ad or content while listening to the original audio. Mark
+              ad/content saves each span; click Recut audio once when finished to update the
+              processed MP3. You do not need Reprocess (that re-runs Whisper/LLM). Effective cuts
+              are highlighted in red.
             </p>
             {selectionSummary && (
-              <p className="text-sm font-medium text-indigo-800 mb-3">{selectionSummary}</p>
+              <p className="mb-3 flex flex-wrap items-center gap-3 text-sm font-medium text-indigo-800">
+                <span>{selectionSummary}</span>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="rounded border border-indigo-300 bg-white px-2 py-0.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50"
+                >
+                  Clear selection
+                </button>
+              </p>
             )}
             {corrections.length > 0 && (
               <p className="text-sm text-indigo-800 mb-3">
@@ -502,18 +510,18 @@ export default function TranscriptCorrectionPanel({
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  {canEdit && (
+                    <th className="w-10 px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <span className="sr-only">Select</span>
+                    </th>
+                  )}
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Seq #</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time Range</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Label</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Text</th>
                 </tr>
               </thead>
-              <tbody
-                className="bg-white divide-y divide-gray-200"
-                onMouseLeave={() => {
-                  if (dragging) setDragging(false);
-                }}
-              >
+              <tbody className="bg-white divide-y divide-gray-200">
                 {segments.map((segment, index) => {
                   const inEffectiveCut = adBlocks.some((block) =>
                     overlaps(segment.start_time, segment.end_time, block)
@@ -530,67 +538,36 @@ export default function TranscriptCorrectionPanel({
                       key={segment.id}
                       className={`${
                         selected
-                          ? 'bg-indigo-100'
+                          ? 'bg-indigo-100 hover:bg-indigo-200'
                           : isPlayingRow
-                            ? 'bg-sky-50'
+                            ? 'bg-sky-50 hover:bg-sky-100'
                             : inEffectiveCut
-                              ? 'bg-red-50'
+                              ? 'bg-red-50 hover:bg-gray-50'
                               : segment.primary_label === 'ad'
-                                ? 'bg-red-50/60'
-                                : ''
-                      } cursor-pointer hover:bg-gray-50`}
-                      onMouseDown={(event) => {
-                        const toggleModifier = event.metaKey || event.ctrlKey;
-                        const rangeModifier = event.shiftKey;
-                        pointerStart.current = {
-                          x: event.clientX,
-                          y: event.clientY,
-                          index,
-                          skipPlay: toggleModifier || rangeModifier,
-                        };
-                        if (!canEdit) return;
-                        event.preventDefault();
-
-                        if (toggleModifier) {
-                          setDragging(false);
-                          setRangeAnchor(index);
-                          setSelectedIndexes((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(index)) next.delete(index);
-                            else next.add(index);
-                            updateBoundsFromSelection(next);
-                            return next;
-                          });
-                          return;
-                        }
-
-                        if (rangeModifier) {
-                          setDragging(false);
-                          const anchor = rangeAnchor ?? index;
-                          setRangeAnchor(anchor);
-                          setSelectedIndexes((prev) => {
-                            const next = new Set([...prev, ...rangeIndexes(anchor, index)]);
-                            updateBoundsFromSelection(next);
-                            return next;
-                          });
-                          return;
-                        }
-
-                        setDragging(true);
-                        setRangeAnchor(index);
-                        const next = new Set([index]);
-                        setSelectedIndexes(next);
-                        applySelectionBounds([segment]);
-                      }}
-                      onMouseEnter={() => {
-                        if (!canEdit || !dragging || rangeAnchor === null) return;
-                        const next = rangeIndexes(rangeAnchor, index);
-                        setSelectedIndexes(next);
-                        const from = Math.min(rangeAnchor, index);
-                        const to = Math.max(rangeAnchor, index);
-                        applySelectionBounds(segments.slice(from, to + 1));
-                      }}
+                                ? 'bg-red-50/60 hover:bg-gray-50'
+                                : 'hover:bg-gray-50'
+                      } cursor-pointer`}
+                      onClick={() => playFrom(segment.start_time)}
                     >
+                      {canEdit && (
+                        <td
+                          className="w-10 px-4 py-3"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            aria-label={`Select segment ${segment.sequence_num}`}
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            onChange={() => undefined}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              event.preventDefault();
+                              toggleSegmentSelection(index, event.shiftKey);
+                            }}
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-sm text-gray-900">{segment.sequence_num}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">
                         {segment.start_time}s - {segment.end_time}s
