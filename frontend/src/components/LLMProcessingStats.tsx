@@ -8,6 +8,7 @@ interface LLMProcessingStatsProps {
   episodeGuid: string;
   hasProcessedAudio: boolean;
   className?: string;
+  showTranscriptButton?: boolean;
 }
 
 type TabId = 'overview' | 'model-calls' | 'transcript' | 'identifications';
@@ -15,7 +16,8 @@ type TabId = 'overview' | 'model-calls' | 'transcript' | 'identifications';
 export default function LLMProcessingStats({
   episodeGuid,
   hasProcessedAudio,
-  className = ''
+  className = '',
+  showTranscriptButton = true,
 }: LLMProcessingStatsProps) {
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -74,6 +76,13 @@ export default function LLMProcessingStats({
     setExpandedModelCalls(newExpanded);
   };
 
+  const openModal = (tab: TabId) => {
+    setActiveTab(tab);
+    setShowModal(true);
+  };
+
+  const triggerClassName = `px-3 py-1 text-xs rounded font-medium transition-colors border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-900 flex items-center gap-1 ${className}`;
+
   if (!hasProcessedAudio) {
     return null;
   }
@@ -81,11 +90,21 @@ export default function LLMProcessingStats({
   return (
     <>
       <button
-        onClick={() => setShowModal(true)}
-        className={`px-3 py-1 text-xs rounded font-medium transition-colors border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-900 flex items-center gap-1 ${className}`}
+        type="button"
+        onClick={() => openModal('overview')}
+        className={triggerClassName}
       >
         Stats
       </button>
+      {showTranscriptButton && (
+        <button
+          type="button"
+          onClick={() => openModal('transcript')}
+          className={triggerClassName}
+        >
+          Transcript
+        </button>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">

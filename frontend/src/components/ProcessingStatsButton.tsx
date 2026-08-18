@@ -22,8 +22,22 @@ export default function ProcessingStatsButton({
     adDetectionStrategy === 'chapter' ||
     adDetectionStrategy === 'chapter_insert'
   ) {
-    return <ChapterProcessingStats episodeGuid={episodeGuid} hasProcessedAudio={hasProcessedAudio} className={className} />;
+    return (
+      <ChapterProcessingStats
+        episodeGuid={episodeGuid}
+        hasProcessedAudio={hasProcessedAudio}
+        className={className}
+        showTranscriptButton={adDetectionStrategy === 'chapter_insert'}
+      />
+    );
   }
 
-  return <LLMProcessingStats episodeGuid={episodeGuid} hasProcessedAudio={hasProcessedAudio} className={className} />;
+  return (
+    <LLMProcessingStats
+      episodeGuid={episodeGuid}
+      hasProcessedAudio={hasProcessedAudio}
+      className={className}
+      showTranscriptButton
+    />
+  );
 }

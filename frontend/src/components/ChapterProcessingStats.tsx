@@ -6,6 +6,7 @@ interface ChapterProcessingStatsProps {
   episodeGuid: string;
   hasProcessedAudio: boolean;
   className?: string;
+  showTranscriptButton?: boolean;
 }
 
 type TabId = 'overview' | 'chapters' | 'transcript';
@@ -13,7 +14,8 @@ type TabId = 'overview' | 'chapters' | 'transcript';
 export default function ChapterProcessingStats({
   episodeGuid,
   hasProcessedAudio,
-  className = ''
+  className = '',
+  showTranscriptButton = false,
 }: ChapterProcessingStatsProps) {
   const [showModal, setShowModal] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('overview');
@@ -24,7 +26,7 @@ export default function ChapterProcessingStats({
     enabled: showModal && hasProcessedAudio,
   });
   const isChapterInsert = stats?.ad_detection_strategy === 'chapter_insert';
-  const showTranscriptTab = isChapterInsert;
+  const showTranscriptTab = isChapterInsert || showTranscriptButton;
   const modelEntries = Object.entries(stats?.processing_stats?.model_types || {});
 
   useEffect(() => {
@@ -51,6 +53,13 @@ export default function ChapterProcessingStats({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const openModal = (tab: TabId) => {
+    setActiveTab(tab);
+    setShowModal(true);
+  };
+
+  const triggerClassName = `px-3 py-1 text-xs rounded font-medium transition-colors border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-900 flex items-center gap-1 ${className}`;
+
   if (!hasProcessedAudio) {
     return null;
   }
@@ -58,11 +67,21 @@ export default function ChapterProcessingStats({
   return (
     <>
       <button
-        onClick={() => setShowModal(true)}
-        className={`px-3 py-1 text-xs rounded font-medium transition-colors border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 hover:border-gray-400 hover:text-gray-900 flex items-center gap-1 ${className}`}
+        type="button"
+        onClick={() => openModal('overview')}
+        className={triggerClassName}
       >
         Stats
       </button>
+      {showTranscriptButton && (
+        <button
+          type="button"
+          onClick={() => openModal('transcript')}
+          className={triggerClassName}
+        >
+          Transcript
+        </button>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
