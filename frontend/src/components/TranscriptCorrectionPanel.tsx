@@ -52,17 +52,31 @@ interface TranscriptCorrectionPanelProps {
   existingPrompt: string | null;
 }
 
-function contiguousIndexGroups(indexes: Set<number>): number[][] {
+const ADJACENT_GAP_SECONDS = 1;
+
+function contiguousIndexGroups(
+  indexes: Set<number>,
+  segments: TranscriptSegmentRow[] = []
+): number[][] {
   if (indexes.size === 0) return [];
   const sorted = [...indexes].sort((a, b) => a - b);
   const groups: number[][] = [];
   let current: number[] = [sorted[0]];
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i] === sorted[i - 1] + 1) {
-      current.push(sorted[i]);
+    const prev = sorted[i - 1];
+    const next = sorted[i];
+    const prevRow = segments[prev];
+    const nextRow = segments[next];
+    const adjacentIndex = next === prev + 1;
+    const adjacentTime =
+      prevRow && nextRow
+        ? nextRow.start_time - prevRow.end_time <= ADJACENT_GAP_SECONDS
+        : true;
+    if (adjacentIndex && adjacentTime) {
+      current.push(next);
     } else {
       groups.push(current);
-      current = [sorted[i]];
+      current = [next];
     }
   }
   groups.push(current);
@@ -75,8 +89,22 @@ function rangeIndexes(from: number, to: number): Set<number> {
   return new Set(Array.from({ length: end - start + 1 }, (_, i) => start + i));
 }
 
-function overlaps(start: number, end: number, block: AdBlock): boolean {
+function overlaps(start: number, end: number, block: { start_time: number; end_time: number }): boolean {
   return start < block.end_time && end > block.start_time;
+}
+
+function latestCorrectionLabel(
+  start: number,
+  end: number,
+  corrections: CorrectionRow[]
+): 'ad' | 'content' | null {
+  let label: 'ad' | 'content' | null = null;
+  for (const correction of corrections) {
+    if (overlaps(start, end, correction)) {
+      label = correction.label;
+    }
+  }
+  return label;
 }
 
 function snapToWords(
@@ -132,8 +160,8 @@ export default function TranscriptCorrectionPanel({
   const [currentTime, setCurrentTime] = useState(0);
 
   const selectionGroups = useMemo(
-    () => contiguousIndexGroups(selectedIndexes),
-    [selectedIndexes]
+    () => contiguousIndexGroups(selectedIndexes, segments),
+    [selectedIndexes, segments]
   );
 
   const selectionSummary =
@@ -150,7 +178,7 @@ export default function TranscriptCorrectionPanel({
 
   const updateBoundsFromSelection = useCallback(
     (indexes: Set<number>) => {
-      const groups = contiguousIndexGroups(indexes);
+      const groups = contiguousIndexGroups(indexes, segments);
       if (groups.length !== 1) return;
       const rows = groups[0].map((index) => segments[index]);
       applySelectionBounds(rows);
@@ -224,7 +252,7 @@ export default function TranscriptCorrectionPanel({
       label: 'ad' | 'content';
       correctionKind: CorrectionKind;
     }) => {
-      const groups = contiguousIndexGroups(selectedIndexes);
+      const groups = contiguousIndexGroups(selectedIndexes, segments);
       if (groups.length > 0) {
         await Promise.all(
           groups.map((group) => {
@@ -232,7 +260,7 @@ export default function TranscriptCorrectionPanel({
             const snapped = snapToWords(
               rows[0].start_time,
               rows[rows.length - 1].end_time,
-              segments
+              rows
             );
             return feedsApi.createAdCorrection(episodeGuid, {
               label,
@@ -523,9 +551,20 @@ export default function TranscriptCorrectionPanel({
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {segments.map((segment, index) => {
-                  const inEffectiveCut = adBlocks.some((block) =>
-                    overlaps(segment.start_time, segment.end_time, block)
+                  const correctionLabel = latestCorrectionLabel(
+                    segment.start_time,
+                    segment.end_time,
+                    corrections
                   );
+                  const inEffectiveCut =
+                    correctionLabel === 'ad' ||
+                    (correctionLabel !== 'content' &&
+                      adBlocks.some((block) =>
+                        overlaps(segment.start_time, segment.end_time, block)
+                      ));
+                  const isAdRow =
+                    inEffectiveCut ||
+                    (correctionLabel !== 'content' && segment.primary_label === 'ad');
                   const selected = selectedIndexes.has(index);
                   const isLast = index === segments.length - 1;
                   const isPlayingRow =
@@ -533,6 +572,11 @@ export default function TranscriptCorrectionPanel({
                     (isLast
                       ? currentTime <= segment.end_time
                       : currentTime < segment.end_time);
+                  const pillText = inEffectiveCut
+                    ? (segment.mixed && correctionLabel !== 'ad' ? 'Cut (mixed)' : 'Cut')
+                    : isAdRow
+                      ? (segment.mixed ? 'Ad (mixed)' : 'Ad')
+                      : 'Content';
                   return (
                     <tr
                       key={segment.id}
@@ -543,7 +587,7 @@ export default function TranscriptCorrectionPanel({
                             ? 'bg-sky-50 hover:bg-sky-100'
                             : inEffectiveCut
                               ? 'bg-red-50 hover:bg-gray-50'
-                              : segment.primary_label === 'ad'
+                              : isAdRow
                                 ? 'bg-red-50/60 hover:bg-gray-50'
                                 : 'hover:bg-gray-50'
                       } cursor-pointer`}
@@ -574,15 +618,11 @@ export default function TranscriptCorrectionPanel({
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                          inEffectiveCut || segment.primary_label === 'ad'
+                          isAdRow
                             ? 'bg-red-100 text-red-800'
                             : 'bg-green-100 text-green-800'
                         }`}>
-                          {inEffectiveCut
-                            ? (segment.mixed ? 'Cut (mixed)' : 'Cut')
-                            : segment.primary_label === 'ad'
-                              ? (segment.mixed ? 'Ad (mixed)' : 'Ad')
-                              : 'Content'}
+                          {pillText}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900 max-w-md">

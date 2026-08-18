@@ -33,6 +33,7 @@
     --podly-green-border: rgb(34 197 94);
     --podly-green-text: rgb(187 247 208);
     --podly-indigo-surface: rgb(67 56 202 / 0.25);
+    --podly-indigo-surface-strong: rgb(49 46 129 / 0.92);
     --podly-indigo-border: rgb(129 140 248);
     --podly-indigo-text: rgb(224 231 255);
     --podly-yellow-surface-strong: rgb(133 77 14 / 0.42);
@@ -374,6 +375,14 @@
 
   html.dark [class~="bg-indigo-50"] {
     background-color: var(--podly-indigo-surface) !important;
+  }
+
+  html.dark [class~="bg-indigo-100"] {
+    background-color: var(--podly-indigo-surface-strong) !important;
+  }
+
+  html.dark [class~="hover:bg-indigo-200"]:hover {
+    background-color: rgb(67 56 202 / 0.95) !important;
   }
 
   html.dark [class~="border-indigo-200"] {
