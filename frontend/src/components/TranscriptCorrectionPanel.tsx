@@ -535,7 +535,7 @@ export default function TranscriptCorrectionPanel({
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <div className="bg-white border rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full divide-y divide-gray-200 select-none">
               <thead className="bg-gray-50">
                 <tr>
                   {canEdit && (
@@ -598,18 +598,31 @@ export default function TranscriptCorrectionPanel({
                           className="w-10 px-4 py-3"
                           onClick={(event) => event.stopPropagation()}
                         >
-                          <input
-                            type="checkbox"
-                            checked={selected}
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={selected}
                             aria-label={`Select segment ${segment.sequence_num}`}
-                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                            onChange={() => undefined}
+                            className={`flex h-4 w-4 items-center justify-center rounded border ${
+                              selected
+                                ? 'border-blue-500 bg-blue-600 text-white'
+                                : 'border-gray-400 bg-white'
+                            }`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              event.preventDefault();
                               toggleSegmentSelection(index, event.shiftKey);
                             }}
-                          />
+                          >
+                            {selected && (
+                              <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path
+                                  fillRule="evenodd"
+                                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                            )}
+                          </button>
                         </td>
                       )}
                       <td className="px-4 py-3 text-sm text-gray-900">{segment.sequence_num}</td>
