@@ -27,6 +27,56 @@ const MAX_JSON_CHARS = 120_000;
 const SENSITIVE_KEY_RE = /(authorization|cookie|set-cookie|token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|password|session)/i;
 const SENSITIVE_VALUE_REPLACEMENT = '[REDACTED]';
 
+const describeUnknownError = (reason: unknown): Record<string, unknown> => {
+  if (reason == null) {
+    return { type: String(reason) };
+  }
+  if (typeof reason !== 'object') {
+    return { type: typeof reason, value: String(reason).slice(0, 300) };
+  }
+  const err = reason as Error & { code?: unknown; cause?: unknown };
+  const cause = err.cause as Error | undefined;
+  const stack = typeof err.stack === 'string' ? err.stack.split('\n').slice(0, 8) : undefined;
+  return {
+    type: typeof reason,
+    isError: reason instanceof Error,
+    name: err.name,
+    message: typeof err.message === 'string' ? err.message.slice(0, 300) : undefined,
+    constructorName: err.constructor?.name,
+    code: err.code,
+    keys: Object.keys(err).slice(0, 20),
+    stack,
+    causeName: cause && typeof cause === 'object' ? cause.name : undefined,
+    causeMessage:
+      cause && typeof cause === 'object' && typeof cause.message === 'string'
+        ? cause.message.slice(0, 300)
+        : undefined,
+    causeConstructor: cause && typeof cause === 'object' ? cause.constructor?.name : undefined,
+  };
+};
+
+const agentDebugLog = (
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>
+) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd37c62' },
+    body: JSON.stringify({
+      sessionId: 'd37c62',
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+};
+
 const redactString = (value: string): string => {
   let v = value;
   // Authorization headers / bearer tokens
@@ -163,6 +213,7 @@ export const emitDiagnosticError = (payload: DiagnosticErrorPayload) => {
 };
 
 let consoleWrapped = false;
+let rejectionHandlerCount = 0;
 
 export const initFrontendDiagnostics = () => {
   if (typeof window === 'undefined') return;
@@ -176,6 +227,13 @@ export const initFrontendDiagnostics = () => {
             .map((a) => (typeof a === 'string' ? a : safeJsonStringify(diagnostics.sanitize(a))))
             .join(' ');
           diagnostics.add(level, msg);
+          if (level === 'warn' && args.some((a) => typeof a === 'string' && /restoring session/i.test(a))) {
+            agentDebugLog('A', 'diagnostics.ts:console.warn', 'session restore console warn', {
+              href: window.location.href,
+              visibility: document.visibilityState,
+              args: args.map((a) => (typeof a === 'string' ? a : describeUnknownError(a))),
+            });
+          }
         } catch {
           // ignore
         }
@@ -201,8 +259,21 @@ export const initFrontendDiagnostics = () => {
     });
   });
 
+  rejectionHandlerCount += 1;
+  const handlerId = rejectionHandlerCount;
+  agentDebugLog('D', 'diagnostics.ts:init', 'unhandledrejection listener attached', {
+    handlerId,
+    href: window.location.href,
+  });
+
   window.addEventListener('unhandledrejection', (event) => {
     const reason = (event as PromiseRejectionEvent).reason;
+    agentDebugLog('C', 'diagnostics.ts:unhandledrejection', 'unhandled promise rejection', {
+      handlerId,
+      href: window.location.href,
+      visibility: document.visibilityState,
+      reason: describeUnknownError(reason),
+    });
     emitDiagnosticError({
       title: 'Unhandled promise rejection',
       message: typeof reason === 'string' ? reason : 'Promise rejected',
