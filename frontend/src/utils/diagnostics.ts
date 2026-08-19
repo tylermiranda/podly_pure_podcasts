@@ -37,7 +37,14 @@ const collectErrorText = (reason: unknown): string => {
   if (reason == null) return '';
   if (typeof reason === 'string') return reason;
   if (typeof reason !== 'object') return String(reason);
-  const err = reason as Error & { fileName?: string; filename?: string };
+  const err = reason as {
+    name?: unknown;
+    message?: unknown;
+    stack?: unknown;
+    fileName?: unknown;
+    filename?: unknown;
+    cause?: unknown;
+  };
   const cause = err.cause;
   return [
     err.name,

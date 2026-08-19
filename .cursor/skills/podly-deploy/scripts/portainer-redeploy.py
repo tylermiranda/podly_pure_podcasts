@@ -27,12 +27,20 @@ def api_key() -> str:
     return match.group(0)
 
 
-def req(method: str, path: str, data: dict | None = None, timeout: int = 180, raw: bool = False):
+def req(
+    method: str,
+    path: str,
+    data: dict | None = None,
+    timeout: int = 180,
+    raw: bool = False,
+):
     body = None if data is None else json.dumps(data).encode()
     headers = {"X-API-Key": api_key()}
     if data is not None:
         headers["Content-Type"] = "application/json"
-    request = urllib.request.Request(BASE + path, data=body, headers=headers, method=method)
+    request = urllib.request.Request(
+        BASE + path, data=body, headers=headers, method=method
+    )
     with urllib.request.urlopen(request, timeout=timeout) as resp:
         payload = resp.read()
         if raw:
@@ -44,7 +52,12 @@ def req(method: str, path: str, data: dict | None = None, timeout: int = 180, ra
 def main() -> None:
     qs = urllib.parse.urlencode({"fromImage": IMAGE, "tag": TAG})
     print("pulling", f"{IMAGE}:{TAG}", flush=True)
-    status, payload = req("POST", f"/endpoints/{ENDPOINT_ID}/docker/images/create?{qs}", timeout=600, raw=True)
+    status, payload = req(
+        "POST",
+        f"/endpoints/{ENDPOINT_ID}/docker/images/create?{qs}",
+        timeout=600,
+        raw=True,
+    )
     print("pull_http", status, "bytes", len(payload), flush=True)
     tail = payload.decode(errors="replace")[-800:].replace("\r", "\n")
     for line in [ln for ln in tail.splitlines() if ln.strip()][-5:]:
@@ -54,7 +67,15 @@ def main() -> None:
     _, stack_file = req("GET", f"/stacks/{STACK_ID}/file")
     compose = stack_file["StackFileContent"]
     env = stack.get("Env") or []
-    print("stack", stack.get("Name"), "id", stack.get("Id"), "status", stack.get("Status"), flush=True)
+    print(
+        "stack",
+        stack.get("Name"),
+        "id",
+        stack.get("Id"),
+        "status",
+        stack.get("Status"),
+        flush=True,
+    )
     for line in compose.splitlines():
         if "image:" in line or "container_name:" in line:
             print(" ", line.strip(), flush=True)
@@ -65,7 +86,9 @@ def main() -> None:
         "Prune": False,
         "PullImage": True,
     }
-    status, updated = req("PUT", f"/stacks/{STACK_ID}?endpointId={ENDPOINT_ID}", body, timeout=180)
+    status, updated = req(
+        "PUT", f"/stacks/{STACK_ID}?endpointId={ENDPOINT_ID}", body, timeout=180
+    )
     print(
         "stack_update",
         status,
@@ -78,7 +101,10 @@ def main() -> None:
 
     filters = urllib.parse.quote(json.dumps({"name": [CONTAINER_NAME]}))
     for i in range(36):
-        containers = req("GET", f"/endpoints/{ENDPOINT_ID}/docker/containers/json?all=true&filters={filters}")[1]
+        containers = req(
+            "GET",
+            f"/endpoints/{ENDPOINT_ID}/docker/containers/json?all=true&filters={filters}",
+        )[1]
         if not containers:
             print(f"container[{i}] missing", flush=True)
             time.sleep(5)
