@@ -48,29 +48,6 @@ api.interceptors.response.use(
       };
 
       diagnostics.add('error', `HTTP error ${status ?? 'NETWORK'} ${method} ${url}`, details);
-      if (!error?.response) {
-        // #region agent log
-        fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd37c62' },
-          body: JSON.stringify({
-            sessionId: 'd37c62',
-            hypothesisId: 'B',
-            location: 'api.ts:interceptor',
-            message: 'axios network/no-response error',
-            data: {
-              method,
-              url,
-              code: error?.code,
-              name: error?.name,
-              message: typeof error?.message === 'string' ? error.message.slice(0, 300) : undefined,
-              constructorName: error?.constructor?.name,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
-      }
     } catch {
       // ignore
     }

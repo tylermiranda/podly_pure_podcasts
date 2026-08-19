@@ -84,28 +84,6 @@ const describeUnknownError = (reason: unknown): Record<string, unknown> => {
   };
 };
 
-const agentDebugLog = (
-  hypothesisId: string,
-  location: string,
-  message: string,
-  data: Record<string, unknown>
-) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7893/ingest/02f807ba-0bb5-4c4e-9d0c-82515d3b644a', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd37c62' },
-    body: JSON.stringify({
-      sessionId: 'd37c62',
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-  // #endregion
-};
-
 const redactString = (value: string): string => {
   let v = value;
   // Authorization headers / bearer tokens
@@ -247,7 +225,6 @@ export const emitDiagnosticError = (payload: DiagnosticErrorPayload) => {
 
 let consoleWrapped = false;
 let diagnosticsInitialized = false;
-let rejectionHandlerCount = 0;
 
 export const initFrontendDiagnostics = () => {
   if (typeof window === 'undefined') return;
@@ -263,13 +240,6 @@ export const initFrontendDiagnostics = () => {
             .map((a) => (typeof a === 'string' ? a : safeJsonStringify(diagnostics.sanitize(a))))
             .join(' ');
           diagnostics.add(level, msg);
-          if (level === 'warn' && args.some((a) => typeof a === 'string' && /restoring session/i.test(a))) {
-            agentDebugLog('A', 'diagnostics.ts:console.warn', 'session restore console warn', {
-              href: window.location.href,
-              visibility: document.visibilityState,
-              args: args.map((a) => (typeof a === 'string' ? a : describeUnknownError(a))),
-            });
-          }
         } catch {
           // ignore
         }
@@ -287,11 +257,6 @@ export const initFrontendDiagnostics = () => {
       (typeof event.filename === 'string' && EXTENSION_URL_RE.test(event.filename)) ||
       isIgnorableUnhandledReason(event.error);
     if (fromExtension) {
-      agentDebugLog('A', 'diagnostics.ts:error', 'ignored extension window error', {
-        href: window.location.href,
-        filename: event.filename,
-        message: event.message,
-      });
       return;
     }
     emitDiagnosticError({
@@ -306,25 +271,9 @@ export const initFrontendDiagnostics = () => {
     });
   });
 
-  rejectionHandlerCount += 1;
-  const handlerId = rejectionHandlerCount;
-  agentDebugLog('D', 'diagnostics.ts:init', 'unhandledrejection listener attached', {
-    handlerId,
-    href: window.location.href,
-  });
-
   window.addEventListener('unhandledrejection', (event) => {
     const reason = (event as PromiseRejectionEvent).reason;
-    const ignored = isIgnorableUnhandledReason(reason);
-    agentDebugLog('C', 'diagnostics.ts:unhandledrejection', 'unhandled promise rejection', {
-      handlerId,
-      href: window.location.href,
-      visibility: document.visibilityState,
-      ignored,
-      runId: 'post-fix',
-      reason: describeUnknownError(reason),
-    });
-    if (ignored) {
+    if (isIgnorableUnhandledReason(reason)) {
       return;
     }
     const described = describeUnknownError(reason);
