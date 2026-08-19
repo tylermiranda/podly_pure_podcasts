@@ -27,6 +27,35 @@ const MAX_JSON_CHARS = 120_000;
 const SENSITIVE_KEY_RE = /(authorization|cookie|set-cookie|token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|secret|password|session)/i;
 const SENSITIVE_VALUE_REPLACEMENT = '[REDACTED]';
 
+const EXTENSION_URL_RE =
+  /^(chrome|moz|safari|safari-web|ms-browser)-extension:\/\//i;
+const EXTENSION_STACK_RE =
+  /chrome-extension:\/\/|moz-extension:\/\/|safari-web-extension:\/\/|webkit-masked-url:/i;
+const EXTENSION_NOISE_RE = /metamask|failed to connect to metamask/i;
+
+const collectErrorText = (reason: unknown): string => {
+  if (reason == null) return '';
+  if (typeof reason === 'string') return reason;
+  if (typeof reason !== 'object') return String(reason);
+  const err = reason as Error & { fileName?: string; filename?: string };
+  const cause = err.cause;
+  return [
+    err.name,
+    err.message,
+    err.stack,
+    err.fileName,
+    err.filename,
+    collectErrorText(cause),
+  ]
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+    .join('\n');
+};
+
+export const isIgnorableUnhandledReason = (reason: unknown): boolean => {
+  const text = collectErrorText(reason);
+  return EXTENSION_STACK_RE.test(text) || EXTENSION_NOISE_RE.test(text);
+};
+
 const describeUnknownError = (reason: unknown): Record<string, unknown> => {
   if (reason == null) {
     return { type: String(reason) };
@@ -98,6 +127,10 @@ const sanitize = (input: unknown, depth = 0): unknown => {
 
   if (typeof input === 'string') return redactString(input);
   if (typeof input === 'number' || typeof input === 'boolean') return input;
+
+  if (input instanceof Error) {
+    return sanitize(describeUnknownError(input), depth + 1);
+  }
 
   if (Array.isArray(input)) {
     return input.slice(0, 50).map((v) => sanitize(v, depth + 1));
@@ -213,10 +246,13 @@ export const emitDiagnosticError = (payload: DiagnosticErrorPayload) => {
 };
 
 let consoleWrapped = false;
+let diagnosticsInitialized = false;
 let rejectionHandlerCount = 0;
 
 export const initFrontendDiagnostics = () => {
   if (typeof window === 'undefined') return;
+  if (diagnosticsInitialized) return;
+  diagnosticsInitialized = true;
 
   if (!consoleWrapped) {
     consoleWrapped = true;
@@ -247,6 +283,17 @@ export const initFrontendDiagnostics = () => {
   }
 
   window.addEventListener('error', (event) => {
+    const fromExtension =
+      (typeof event.filename === 'string' && EXTENSION_URL_RE.test(event.filename)) ||
+      isIgnorableUnhandledReason(event.error);
+    if (fromExtension) {
+      agentDebugLog('A', 'diagnostics.ts:error', 'ignored extension window error', {
+        href: window.location.href,
+        filename: event.filename,
+        message: event.message,
+      });
+      return;
+    }
     emitDiagnosticError({
       title: 'Unhandled error',
       message: event.message || 'Unknown error',
@@ -268,17 +315,29 @@ export const initFrontendDiagnostics = () => {
 
   window.addEventListener('unhandledrejection', (event) => {
     const reason = (event as PromiseRejectionEvent).reason;
+    const ignored = isIgnorableUnhandledReason(reason);
     agentDebugLog('C', 'diagnostics.ts:unhandledrejection', 'unhandled promise rejection', {
       handlerId,
       href: window.location.href,
       visibility: document.visibilityState,
+      ignored,
+      runId: 'post-fix',
       reason: describeUnknownError(reason),
     });
+    if (ignored) {
+      return;
+    }
+    const described = describeUnknownError(reason);
     emitDiagnosticError({
       title: 'Unhandled promise rejection',
-      message: typeof reason === 'string' ? reason : 'Promise rejected',
+      message:
+        typeof reason === 'string'
+          ? reason
+          : typeof described.message === 'string' && described.message
+            ? described.message
+            : 'Promise rejected',
       kind: 'app',
-      details: reason,
+      details: described,
     });
   });
 };
