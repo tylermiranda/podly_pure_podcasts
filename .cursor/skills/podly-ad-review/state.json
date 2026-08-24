@@ -2,9 +2,9 @@
   "version": 1,
   "status": "idle",
   "podly_url": "http://192.168.1.5:5001",
-  "lmstudio_base_url": "http://192.168.1.24:1234/v1",
+  "lmstudio_base_url": "http://lmstudio.lan.tylermiranda.com:1234/v1",
   "llm_model": "openai/~deepseek/deepseek-v4-flash-latest",
-  "whisper_base_url": "http://192.168.1.24:9001/v1",
+  "whisper_base_url": "http://whisper.lan.tylermiranda.com:9001/v1",
   "watched_feed_ids": [
     1,
     2,

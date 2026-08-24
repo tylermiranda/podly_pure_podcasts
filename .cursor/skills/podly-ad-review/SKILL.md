@@ -18,8 +18,9 @@ Not a 24/7 improver. About every 1–2 hours, check **new** episodes on Tower. S
 | Piece | Location |
 |-------|----------|
 | Check script + launchd | This Mac |
-| LM Studio (classify) | `http://192.168.1.24:1234/v1` |
-| whisper-mlx | `http://192.168.1.24:9001/v1` (do not change) |
+| LM Studio (classify) | `http://lmstudio.lan.tylermiranda.com:1234/v1` |
+| whisper-mlx | `http://whisper.lan.tylermiranda.com:9001/v1` |
+| Tailscale fallback | `tylers-macbook-pro.banded-ratio.ts.net` (not for Tower containers) |
 | Podly | `http://192.168.1.5:5001` |
 
 Default LLM model id for litellm + LM Studio: `openai/google/gemma-4-12b`
