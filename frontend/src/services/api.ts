@@ -471,6 +471,21 @@ export const feedsApi = {
     return response.data;
   },
 
+  analyzeAdCorrectionsPrompt: async (
+    guid: string
+  ): Promise<{
+    draft: string;
+    correction_count: number;
+    existing_prompt: string | null;
+  }> => {
+    const response = await api.post(
+      `/api/posts/${guid}/ad-corrections/analyze-prompt`,
+      undefined,
+      { timeout: 180_000 }
+    );
+    return response.data;
+  },
+
   // Legacy aliases for backward compatibility
   getFeedEpisodes: async (
     feedId: number,

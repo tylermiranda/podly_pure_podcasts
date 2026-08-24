@@ -25,6 +25,18 @@ CORRECTION_KINDS = ("missed_ad", "false_positive", "retime")
 CORRECTION_LABELS = ("ad", "content")
 EXAMPLE_LIMIT = 6
 PROMOTION_MIN_REPEATS = 3
+ANALYZE_MAX_CORRECTIONS = 40
+ANALYZE_SNIPPET_CHARS = 200
+ANALYZE_PROMPT_SYSTEM = (
+    "You write short, durable show-specific rules for podcast ad classification. "
+    "Given human corrections (missed ads and false-positive content), produce plain "
+    "text instructions that help an LLM correctly label similar segments on future "
+    "episodes of the same show. Separate CONTENT (do not cut) patterns from AD "
+    "(cut) patterns when both appear. Do not dump transcript quotes at length; "
+    "generalize briefly with short illustrative phrases only when useful. "
+    "Do not repeat guidance already present in the existing show prompt. "
+    "Return only the new rules as a few short sentences or bullets — no preamble."
+)
 
 
 def default_kind_for_label(label: str) -> str:
@@ -299,6 +311,112 @@ def suggested_prompt_snippet(
         existing_prompt=existing_prompt,
         min_repeats=min_repeats,
     ).get("snippet")
+
+
+def _truncate_snippet(text: str | None, *, limit: int = ANALYZE_SNIPPET_CHARS) -> str:
+    snippet = (text or "").strip()
+    if len(snippet) > limit:
+        return snippet[: limit - 3].rstrip() + "..."
+    return snippet
+
+
+def format_corrections_for_prompt_analysis(
+    corrections: list[Any],
+) -> str:
+    """Compact human-readable list of corrections for LLM analysis."""
+    lines: list[str] = []
+    for correction in corrections[:ANALYZE_MAX_CORRECTIONS]:
+        label = "AD" if correction.label == "ad" else "CONTENT"
+        snippet = _truncate_snippet(correction.example_text)
+        reason = (correction.reason or "").strip()
+        line = (
+            f"[{float(correction.start_time):.1f}-{float(correction.end_time):.1f}] "
+            f"{label} ({correction.kind})"
+        )
+        if snippet:
+            line += f' "{snippet}"'
+        if reason:
+            line += f" — note: {reason}"
+        lines.append(line)
+    omitted = len(corrections) - ANALYZE_MAX_CORRECTIONS
+    if omitted > 0:
+        lines.append(f"...and {omitted} more correction(s) omitted")
+    return "\n".join(lines)
+
+
+def build_analyze_prompt_messages(
+    *,
+    corrections_block: str,
+    existing_prompt: str | None = None,
+) -> list[dict[str, str]]:
+    existing = (existing_prompt or "").strip()
+    existing_section = existing if existing else "(none)"
+    user_content = (
+        "Existing show prompt (do not duplicate):\n"
+        f"{existing_section}\n\n"
+        "Human corrections from one episode:\n"
+        f"{corrections_block}\n\n"
+        "Write new durable show rules only."
+    )
+    return [
+        {"role": "system", "content": ANALYZE_PROMPT_SYSTEM},
+        {"role": "user", "content": user_content},
+    ]
+
+
+def analyze_corrections_for_prompt(
+    *,
+    post_id: int,
+    existing_prompt: str | None = None,
+    config: Any | None = None,
+) -> dict[str, Any]:
+    """LLM-synthesize feed-prompt draft from this episode's active corrections.
+
+    Does not write the feed. Raises ValueError when there are no corrections or
+    the model returns empty text.
+    """
+    import litellm
+
+    from podcast_processor.llm_model_call_utils import extract_litellm_content
+
+    corrections = load_active_corrections_for_post(post_id)
+    if not corrections:
+        raise ValueError("No saved corrections to analyze")
+
+    if config is None:
+        from app.runtime_config import config as runtime_config
+
+        config = runtime_config
+
+    corrections_block = format_corrections_for_prompt_analysis(corrections)
+    messages = build_analyze_prompt_messages(
+        corrections_block=corrections_block,
+        existing_prompt=existing_prompt,
+    )
+
+    completion_args: dict[str, Any] = {
+        "model": getattr(config, "llm_model", None) or "gpt-4o",
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 800,
+        "timeout": int(getattr(config, "openai_timeout", 300) or 300),
+        "api_key": getattr(config, "llm_api_key", None),
+    }
+    base_url = getattr(config, "openai_base_url", None)
+    if isinstance(base_url, str) and base_url.strip():
+        completion_args["base_url"] = base_url.strip()
+
+    response = litellm.completion(**completion_args)
+    draft = extract_litellm_content(response).strip()
+    if not draft:
+        raise ValueError("Model returned an empty prompt draft")
+
+    existing = (existing_prompt or "").strip() or None
+    return {
+        "draft": draft,
+        "correction_count": len(corrections),
+        "existing_prompt": existing,
+    }
 
 
 def processed_audio_needs_recut(post: Post) -> bool:

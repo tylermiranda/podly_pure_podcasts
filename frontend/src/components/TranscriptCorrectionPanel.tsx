@@ -158,6 +158,10 @@ export default function TranscriptCorrectionPanel({
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [learnedDraft, setLearnedDraft] = useState<string | null>(null);
+  const [learnedExistingPrompt, setLearnedExistingPrompt] = useState<string | null>(
+    null
+  );
 
   const selectionGroups = useMemo(
     () => contiguousIndexGroups(selectedIndexes, segments),
@@ -334,6 +338,42 @@ export default function TranscriptCorrectionPanel({
     },
     onSuccess: async () => {
       toast.success('Feed prompt updated');
+      await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
+      await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
+    },
+    onError: (err: unknown) => {
+      setError(getHttpErrorInfo(err).message);
+    },
+  });
+
+  const analyzePromptMutation = useMutation({
+    mutationFn: () => feedsApi.analyzeAdCorrectionsPrompt(episodeGuid),
+    onSuccess: (data) => {
+      setError(null);
+      setLearnedDraft(data.draft);
+      setLearnedExistingPrompt(data.existing_prompt);
+      setStatus(null);
+      toast.success('Draft show prompt ready — review before appending');
+    },
+    onError: (err: unknown) => {
+      setStatus(null);
+      setError(getHttpErrorInfo(err).message);
+    },
+  });
+
+  const acceptLearnedDraftMutation = useMutation({
+    mutationFn: async () => {
+      const snippet = learnedDraft?.trim();
+      if (!snippet) return;
+      const existing =
+        (learnedExistingPrompt ?? existingPrompt)?.trim() || '';
+      const next = existing ? `${existing}\n\n${snippet}` : snippet;
+      return feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
+    },
+    onSuccess: async () => {
+      toast.success('Feed prompt updated');
+      setLearnedDraft(null);
+      setLearnedExistingPrompt(null);
       await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
       await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
     },
@@ -654,7 +694,63 @@ export default function TranscriptCorrectionPanel({
 
         {corrections.length > 0 && (
           <div className="mt-4 text-left">
-            <h4 className="font-medium text-gray-900 mb-2">Saved corrections ({corrections.length})</h4>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h4 className="font-medium text-gray-900">
+                Saved corrections ({corrections.length})
+              </h4>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus('Analyzing corrections for show prompt…');
+                    analyzePromptMutation.mutate();
+                  }}
+                  disabled={
+                    analyzePromptMutation.isPending ||
+                    acceptLearnedDraftMutation.isPending ||
+                    saveMutation.isPending
+                  }
+                  className="rounded bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                >
+                  {analyzePromptMutation.isPending
+                    ? 'Analyzing…'
+                    : 'Learn for show prompt'}
+                </button>
+              )}
+            </div>
+            {learnedDraft && canEdit && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
+                <p className="text-sm font-medium text-amber-900 mb-1">
+                  Draft show prompt from corrections
+                </p>
+                <p className="text-sm text-amber-800 mb-2 whitespace-pre-wrap">
+                  {learnedDraft}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => acceptLearnedDraftMutation.mutate()}
+                    disabled={acceptLearnedDraftMutation.isPending}
+                    className="rounded bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+                  >
+                    {acceptLearnedDraftMutation.isPending
+                      ? 'Appending…'
+                      : 'Append to feed prompt'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLearnedDraft(null);
+                      setLearnedExistingPrompt(null);
+                    }}
+                    disabled={acceptLearnedDraftMutation.isPending}
+                    className="rounded border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
             <ul className="space-y-1 text-sm text-gray-700">
               {corrections.map((correction) => (
                 <li key={correction.id}>

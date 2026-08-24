@@ -131,6 +131,16 @@
       "pass": false,
       "needs_attention": true,
       "checked_at": "2026-08-21T09:28:33.196138Z"
+    },
+    "492416a4-1fea-56fd-9735-2b3b8630ba80": {
+      "pass": true,
+      "ad_pct": 15.5,
+      "checked_at": "2026-08-24T18:14:20.048606Z"
+    },
+    "b23000fa-66fb-4df2-a3be-455bf17c5477": {
+      "pass": true,
+      "ad_pct": 12.3,
+      "checked_at": "2026-08-24T18:14:20.210284Z"
     }
   },
   "failures": {
@@ -972,9 +982,29 @@
         }
       ],
       "warnings": []
+    },
+    {
+      "ts": "2026-08-24T18:14:20.048571Z",
+      "guid": "492416a4-1fea-56fd-9735-2b3b8630ba80",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": true,
+      "ad_pct": 15.5,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-24T18:14:20.210245Z",
+      "guid": "b23000fa-66fb-4df2-a3be-455bf17c5477",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": true,
+      "ad_pct": 12.3,
+      "failures": [],
+      "warnings": []
     }
   ],
   "local_num_segments_per_prompt": 24,
-  "last_run_at": "2026-08-21T09:28:33.199513Z",
+  "last_run_at": "2026-08-24T18:14:20.213775Z",
   "notes": "DeepSeek Flash reprocess 2026-08-12 (refiners off, segments=60, content_guard hot-patched). PM 14.7% band-fail + unlabeled interview FPs ~1180-1299s. H90 0% \u2014 ModelCall 953 failed_permanent empty response. E80 12.1% mixed bleeds still in labels (Grow disclaimer + cold-open; Jerry.ai + cold-open)."
 }

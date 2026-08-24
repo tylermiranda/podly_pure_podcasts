@@ -19,7 +19,10 @@ from app.writer.actions.cleanup import (
 )
 from app.writer.actions.processor import insert_ad_correction_action
 from podcast_processor.ad_corrections import (
+    analyze_corrections_for_prompt,
+    build_analyze_prompt_messages,
     format_correction_examples_prompt,
+    format_corrections_for_prompt_analysis,
     processed_audio_needs_recut,
     retrieve_correction_examples,
     snap_range_to_words,
@@ -733,3 +736,119 @@ def test_cut_eligible_identifications_excludes_low_confidence() -> None:
     assert eligible == [high]
     _labeled, effective = final_cut_windows(eligible, [])
     assert effective == [(0.0, 5.0)]
+
+
+def test_build_analyze_prompt_messages_includes_existing_and_corrections() -> None:
+    messages = build_analyze_prompt_messages(
+        corrections_block='[1.0-2.0] CONTENT (false_positive) "It is July"',
+        existing_prompt="Keep cold opens.",
+    )
+    assert messages[0]["role"] == "system"
+    user = messages[1]["content"]
+    assert "Keep cold opens." in user
+    assert "false_positive" in user
+    assert "It is July" in user
+
+
+def test_format_corrections_for_prompt_analysis() -> None:
+    correction = SimpleNamespace(
+        start_time=10.0,
+        end_time=12.5,
+        label="ad",
+        kind="missed_ad",
+        example_text="brought to you by Acme",
+        reason="midroll",
+    )
+    block = format_corrections_for_prompt_analysis([correction])
+    assert (
+        '[10.0-12.5] AD (missed_ad) "brought to you by Acme" — note: midroll' in block
+    )
+
+
+def test_analyze_corrections_for_prompt_raises_without_corrections(app) -> None:
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-analyze-empty",
+            rss_url="https://example.com/corr-analyze-empty.xml",
+        )
+        try:
+            analyze_corrections_for_prompt(post_id=post.id)
+            raise AssertionError("expected ValueError")
+        except ValueError as exc:
+            assert "No saved corrections" in str(exc)
+
+
+def test_analyze_prompt_route_returns_draft_without_writing_feed(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-analyze-guid",
+            rss_url="https://example.com/corr-analyze.xml",
+        )
+        feed.custom_llm_ad_prompt = "Existing show rule."
+        db.session.add(
+            AdCorrection(
+                post_id=post.id,
+                feed_id=feed.id,
+                kind="false_positive",
+                label="content",
+                start_time=59.4,
+                end_time=61.4,
+                example_text="It is July the 1st, 1936.",
+                stale=False,
+            )
+        )
+        db.session.commit()
+        guid = post.guid
+        feed_id = feed.id
+
+    mock_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content='Treat dated cold-opens like "It is July…" as CONTENT.'
+                )
+            )
+        ]
+    )
+    client = app.test_client()
+    with mock.patch(
+        "litellm.completion",
+        return_value=mock_response,
+    ) as completion_mock:
+        response = client.post(f"/api/posts/{guid}/ad-corrections/analyze-prompt")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["correction_count"] == 1
+    assert payload["existing_prompt"] == "Existing show rule."
+    assert "CONTENT" in payload["draft"]
+    completion_mock.assert_called_once()
+    call_kwargs = completion_mock.call_args.kwargs
+    assert "Existing show rule." in call_kwargs["messages"][1]["content"]
+    assert "It is July" in call_kwargs["messages"][1]["content"]
+
+    with app.app_context():
+        unchanged = db.session.get(Feed, feed_id)
+        assert unchanged is not None
+        assert unchanged.custom_llm_ad_prompt == "Existing show rule."
+
+
+def test_analyze_prompt_route_empty_corrections_returns_400(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-analyze-400",
+            rss_url="https://example.com/corr-analyze-400.xml",
+        )
+        guid = post.guid
+
+    client = app.test_client()
+    response = client.post(f"/api/posts/{guid}/ad-corrections/analyze-prompt")
+    assert response.status_code == 400
+    assert "No saved corrections" in response.get_json()["error"]

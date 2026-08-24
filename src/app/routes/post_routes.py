@@ -803,6 +803,42 @@ def api_apply_ad_corrections(p_guid: str) -> ResponseReturnValue:
     return flask.jsonify(apply_data or {})
 
 
+@post_bp.route(
+    "/api/posts/<string:p_guid>/ad-corrections/analyze-prompt", methods=["POST"]
+)
+def api_analyze_ad_corrections_prompt(p_guid: str) -> ResponseReturnValue:
+    """LLM-draft feed prompt rules from this episode's saved corrections (no write)."""
+    from podcast_processor.ad_corrections import analyze_corrections_for_prompt
+
+    post = Post.query.filter_by(guid=p_guid).first()
+    if post is None:
+        return flask.make_response(flask.jsonify({"error": "Post not found"}), 404)
+
+    _, error = require_admin("analyze corrections for the show prompt")
+    if error:
+        return error
+
+    feed = db.session.get(Feed, post.feed_id) if post.feed_id is not None else None
+    existing_prompt = getattr(feed, "custom_llm_ad_prompt", None) if feed else None
+
+    try:
+        result = analyze_corrections_for_prompt(
+            post_id=post.id,
+            existing_prompt=existing_prompt,
+            config=runtime_config,
+        )
+    except ValueError as exc:
+        return flask.make_response(flask.jsonify({"error": str(exc)}), 400)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("analyze-prompt failed for post %s: %s", post.id, exc)
+        return flask.make_response(
+            flask.jsonify({"error": "Failed to analyze corrections"}),
+            500,
+        )
+
+    return flask.jsonify(result)
+
+
 @post_bp.route("/api/posts/<string:p_guid>/whitelist", methods=["POST"])
 def api_toggle_whitelist(p_guid: str) -> ResponseReturnValue:
     """Toggle whitelist status for a post via API (admins only)."""
