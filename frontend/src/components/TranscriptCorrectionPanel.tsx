@@ -292,6 +292,7 @@ export default function TranscriptCorrectionPanel({
       return { count: 1 };
     },
     onSuccess: async (result) => {
+      clearSelection();
       const count = result.count;
       setError(null);
       setStatus(
