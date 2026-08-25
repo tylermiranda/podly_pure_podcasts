@@ -23,6 +23,7 @@ from podcast_processor.ad_corrections import (
     build_analyze_prompt_messages,
     format_correction_examples_prompt,
     format_corrections_for_prompt_analysis,
+    heuristic_prompt_draft_from_corrections,
     processed_audio_needs_recut,
     retrieve_correction_examples,
     snap_range_to_words,
@@ -777,6 +778,76 @@ def test_analyze_corrections_for_prompt_raises_without_corrections(app) -> None:
             raise AssertionError("expected ValueError")
         except ValueError as exc:
             assert "No saved corrections" in str(exc)
+
+
+def test_heuristic_prompt_draft_from_corrections_content_and_ads() -> None:
+    corrections = [
+        SimpleNamespace(
+            label="content",
+            example_text="Copyright 2026 by Audible Originals, LLC.",
+        ),
+        SimpleNamespace(
+            label="content",
+            example_text="Sound recording copyright 2026 by Audible Originals, LLC.",
+        ),
+        SimpleNamespace(
+            label="ad",
+            example_text="brought to you by Acme Widgets",
+        ),
+    ]
+    draft = heuristic_prompt_draft_from_corrections(corrections)
+    assert "CONTENT" in draft
+    assert "Copyright 2026" in draft
+    assert "Cut sponsor" in draft
+    assert "Acme Widgets" in draft
+
+
+def test_analyze_corrections_falls_back_when_model_returns_empty(app) -> None:
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-analyze-fallback",
+            rss_url="https://example.com/corr-analyze-fallback.xml",
+        )
+        db.session.add(
+            AdCorrection(
+                post_id=post.id,
+                feed_id=feed.id,
+                kind="false_positive",
+                label="content",
+                start_time=2581.4,
+                end_time=2584.5,
+                example_text="Copyright 2026 by Audible Originals, LLC.",
+                stale=False,
+            )
+        )
+        db.session.commit()
+        post_id = post.id
+
+    empty_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=""))]
+    )
+    config = SimpleNamespace(
+        llm_model="openai/google/gemma-4-12b",
+        llm_api_key="test-key",
+        openai_base_url="http://127.0.0.1:1234/v1",
+        openai_timeout=30,
+    )
+    with app.app_context():
+        with mock.patch(
+            "litellm.completion", return_value=empty_response
+        ) as completion:
+            result = analyze_corrections_for_prompt(
+                post_id=post_id,
+                existing_prompt=None,
+                config=config,
+            )
+
+        assert result["correction_count"] == 1
+        assert "CONTENT" in result["draft"]
+        assert "Copyright 2026" in result["draft"]
+        assert completion.call_args.kwargs.get("max_tokens") == 800
+        assert "max_completion_tokens" not in completion.call_args.kwargs
 
 
 def test_analyze_prompt_route_returns_draft_without_writing_feed(app) -> None:

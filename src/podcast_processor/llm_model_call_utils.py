@@ -111,18 +111,63 @@ def try_update_model_call(
         )
 
 
+def _choice_field(choice: Any, name: str) -> Any:
+    if choice is None:
+        return None
+    value = getattr(choice, name, None)
+    if value is None and isinstance(choice, dict):
+        value = choice.get(name)
+    return value
+
+
+def _message_field(message: Any, name: str) -> Any:
+    if message is None:
+        return None
+    value = getattr(message, name, None)
+    if value is None and isinstance(message, dict):
+        value = message.get(name)
+    return value
+
+
+def _stringify_message_content(content: Any) -> str:
+    """Normalize chat ``content`` which may be a string or content-part list."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                text = part
+            elif isinstance(part, dict):
+                text = part.get("text") or part.get("content") or ""
+            else:
+                text = (
+                    getattr(part, "text", None) or getattr(part, "content", None) or ""
+                )
+            if text:
+                parts.append(str(text))
+        return "\n".join(parts)
+    return str(content)
+
+
 def extract_litellm_content(response: Any) -> str:
     """Extracts the primary text content from a litellm completion response."""
-    choices = getattr(response, "choices", None) or []
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    choices = choices or []
     choice = choices[0] if choices else None
     if not choice:
         return ""
 
-    # Prefer chat content; fall back to text for completion-style responses
-    content = getattr(getattr(choice, "message", None), "content", None) or ""
-    if not content:
-        content = getattr(choice, "text", "") or ""
-    return str(content)
+    message = _choice_field(choice, "message")
+    content = _stringify_message_content(_message_field(message, "content"))
+    if not content.strip():
+        # Completion-style responses use ``text`` instead of message.content
+        content = _stringify_message_content(_choice_field(choice, "text"))
+    return content
 
 
 def extract_litellm_finish_reason(response: Any) -> str | None:
