@@ -1008,7 +1008,9 @@ def generate_feed_xml(feed: Feed) -> Any:
     items = [feed_item(post) for post in posts]
 
     base_url = _get_base_url()
-    link = _append_feed_token_params(f"{base_url}/feed/{feed.id}")
+    # Channel <link> must be an HTML homepage (not the RSS URL). Google/YTM
+    # expect this page to advertise the feed via rel=alternate.
+    link = _append_feed_token_params(f"{base_url}/feed/{feed.id}/home")
 
     last_build_date = format_datetime(_feed_last_changed_at_aware(feed))
     itunes_fields = _channel_itunes_fields(feed)

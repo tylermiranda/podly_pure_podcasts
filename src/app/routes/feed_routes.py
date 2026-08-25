@@ -32,7 +32,9 @@ from app.auth.service import update_user_last_active
 from app.client_user_agent import normalize_client_user_agent
 from app.extensions import db
 from app.feeds import (
+    _append_feed_token_params,
     _get_base_url,
+    _normalize_feed_text,
     add_or_refresh_feed,
     ensure_requested_feed_language,
     ensure_requested_feed_prompt_tag,
@@ -520,7 +522,7 @@ def _spawn_async_refresh(app: Flask, feed_id: int) -> None:
 # Bump when generated feed XML shape changes without a DB content write
 # (e.g. author/guid serialization). Otherwise clients with If-None-Match keep
 # a stale body forever via 304 even though the on-disk feed is different.
-_FEED_XML_ETAG_VERSION = "4"
+_FEED_XML_ETAG_VERSION = "5"
 
 
 def _aware_utc(value: datetime.datetime | None) -> datetime.datetime | None:
@@ -594,6 +596,40 @@ def _make_feed_304(etag: str, last_modified_aware: datetime.datetime) -> Respons
     response = make_response("", 304)
     _apply_feed_response_headers(response, etag, last_modified_aware)
     return response
+
+
+@feed_bp.route("/feed/<int:f_id>/home", methods=["GET"])
+def get_feed_home(f_id: int) -> Response:
+    """HTML show homepage for RSS channel <link> (Google / YTM discovery)."""
+    from markupsafe import escape
+
+    if hasattr(g, "current_user") and g.current_user:
+        update_user_last_active(g.current_user.id)
+
+    feed = Feed.query.get_or_404(f_id)
+    base_url = _get_base_url()
+    rss_href = _append_feed_token_params(f"{base_url}/feed/{feed.id}")
+    title = feed.title or "Podcast"
+    description = _normalize_feed_text(feed.description) or ""
+    image_url = feed.image_url or ""
+    image_tag = (
+        f"<img src='{escape(image_url)}' alt='' width='300' height='300'>"
+        if image_url
+        else ""
+    )
+    body = (
+        "<!DOCTYPE html><html><head>"
+        f"<meta charset='utf-8'><title>{escape(title)}</title>"
+        f'<link rel="alternate" type="application/rss+xml" '
+        f'title="{escape(title)}" href="{escape(rss_href)}">'
+        "</head><body>"
+        f"<h1>{escape(title)}</h1>"
+        f"{image_tag}"
+        f"<p>{escape(description)}</p>"
+        f'<p><a href="{escape(rss_href)}">RSS feed</a></p>'
+        "</body></html>"
+    )
+    return Response(body, status=200, mimetype="text/html; charset=utf-8")
 
 
 @feed_bp.route("/feed/<int:f_id>", methods=["GET"])

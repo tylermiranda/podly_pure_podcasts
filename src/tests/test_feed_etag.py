@@ -225,3 +225,29 @@ def test_feed_etag_changes_when_xml_format_version_bumps(app):
         with mock.patch.object(feed_routes, "_FEED_XML_ETAG_VERSION", "999"):
             etag_after = feed_routes._compute_feed_etag(feed)
         assert etag_before != etag_after
+
+
+def test_get_feed_home_returns_html_with_rss_alternate(app):
+    app.testing = True
+    _register_feed_routes(app)
+
+    with app.app_context():
+        feed_id = _make_feed_with_post()
+        feed = db.session.get(Feed, feed_id)
+        assert feed is not None
+        feed.description = "Show about history"
+        feed.image_url = "https://example.com/cover.jpg"
+        db.session.commit()
+
+    client = app.test_client()
+    with mock.patch("app.routes.feed_routes._get_base_url", return_value="http://test"):
+        resp = client.get(f"/feed/{feed_id}/home")
+
+    assert resp.status_code == 200
+    assert "text/html" in (resp.headers.get("Content-Type") or "")
+    body = resp.get_data(as_text=True)
+    assert "Show about history" in body
+    assert 'rel="alternate"' in body
+    assert 'type="application/rss+xml"' in body
+    assert f'href="http://test/feed/{feed_id}"' in body
+    assert "https://example.com/cover.jpg" in body

@@ -55,6 +55,8 @@ _PUBLIC_EXTENSIONS: tuple[str, ...] = (
 
 _TOKEN_PROTECTED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/feed/[^/]+$"),
+    # HTML show homepage for channel <link> (Google / YTM reciprocal discovery)
+    re.compile(r"^/feed/[^/]+/home$"),
     re.compile(r"^/feed/user/[^/]+$"),
     re.compile(r"^/api/posts/[^/]+/(audio|download(?:/original)?)$"),
     # Episode landing HTML + MP3 enclosures (feed token in query)

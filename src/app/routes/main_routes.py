@@ -33,6 +33,7 @@ def robots_txt() -> flask.Response:
             "Allow: /feed",
             "Allow: /post",
             "Allow: /health",
+            "Allow: /robots.txt",
             "Disallow: /",
             "",
         ]

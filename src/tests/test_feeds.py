@@ -1731,6 +1731,9 @@ def test_generate_feed_xml_emits_apple_channel_and_item_tags(app, monkeypatch):
         assert "<itunes:owner>" in xml
         assert "<itunes:email>podly@tylermiranda.com</itunes:email>" in xml
         assert "xmlns:googleplay=" in xml
+        # Channel <link> is HTML homepage, not the RSS document itself.
+        channel = xml.split("<item>", 1)[0]
+        assert f"<link>http://test/feed/{feed.id}/home</link>" in channel
         # RSS <author> must be an email; display names belong in itunes:author only.
         assert "<author>Kathy Kenzora</author>" not in xml
         assert 'guid isPermaLink="false">ep-guid-1</guid>' in xml
