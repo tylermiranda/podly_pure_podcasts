@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import logging
 import secrets
 import time
@@ -23,6 +24,7 @@ from flask import (
     url_for,
 )
 from flask.typing import ResponseReturnValue
+from werkzeug.http import http_date
 
 from app.auth import is_auth_enabled
 from app.auth.guards import require_admin
@@ -36,12 +38,14 @@ from app.feeds import (
     ensure_requested_feed_prompt_tag,
     generate_aggregate_feed_xml,
     generate_feed_xml,
+    get_aggregate_feed_last_changed_at,
     is_feed_active_for_user,
     refresh_feed,
 )
 from app.jobs_manager import get_jobs_manager
 from app.models import (
     Feed,
+    Post,
     Tag,
     User,
     UserFeed,
@@ -513,12 +517,88 @@ def _spawn_async_refresh(app: Flask, feed_id: int) -> None:
     ).start()
 
 
+def _aware_utc(value: datetime.datetime | None) -> datetime.datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=datetime.UTC)
+    return value.astimezone(datetime.UTC)
+
+
+def _compute_feed_etag(feed: Feed) -> str:
+    """Build a strong ETag value (bare hash, unquoted) for `feed`'s state."""
+    post_count, max_post_id = (
+        db.session.query(db.func.count(Post.id), db.func.max(Post.id))
+        .filter(Post.feed_id == feed.id)
+        .one()
+    )
+    last_changed = feed.last_changed_at or datetime.datetime.now(datetime.UTC)
+    payload = (
+        f"{feed.id}:{last_changed.isoformat()}:{post_count or 0}:{max_post_id or 0}"
+    )
+    return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def _compute_aggregate_etag(user: User | None) -> str:
+    """Build a strong ETag value (bare hash) for the aggregate feed."""
+    if not current_app.config.get("REQUIRE_AUTH") or user is None:
+        feed_ids = sorted(r[0] for r in db.session.query(Feed.id).all())
+    else:
+        feed_ids = sorted(
+            r[0]
+            for r in db.session.query(UserFeed.feed_id)
+            .filter(UserFeed.user_id == user.id)
+            .all()
+        )
+    last_changed = get_aggregate_feed_last_changed_at(user)
+    user_id = user.id if user else 0
+    payload = f"agg:{user_id}:{last_changed.isoformat()}:{','.join(map(str, feed_ids))}"
+    return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+def _client_has_current_version(
+    etag: str, last_modified_aware: datetime.datetime | None
+) -> bool:
+    """True if the request signals it already has this exact response."""
+    if request.if_none_match and request.if_none_match.contains(etag):
+        return True
+    if last_modified_aware is not None and request.if_modified_since is not None:
+        lm = last_modified_aware.replace(microsecond=0)
+        ims = request.if_modified_since
+        if ims.tzinfo is None:
+            ims = ims.replace(tzinfo=datetime.UTC)
+        if lm <= ims:
+            return True
+    return False
+
+
+def _apply_feed_response_headers(
+    response: Response, etag: str, last_modified_aware: datetime.datetime
+) -> None:
+    response.headers["ETag"] = f'"{etag}"'
+    response.headers["Last-Modified"] = http_date(last_modified_aware)
+    response.headers["Cache-Control"] = "public, max-age=60"
+
+
+def _make_feed_304(etag: str, last_modified_aware: datetime.datetime) -> Response:
+    response = make_response("", 304)
+    _apply_feed_response_headers(response, etag, last_modified_aware)
+    return response
+
+
 @feed_bp.route("/feed/<int:f_id>", methods=["GET"])
 def get_feed(f_id: int) -> Response:
     if hasattr(g, "current_user") and g.current_user:
         update_user_last_active(g.current_user.id)
 
     feed = Feed.query.get_or_404(f_id)
+
+    cached_etag = _compute_feed_etag(feed)
+    cached_last_modified = _aware_utc(feed.last_changed_at) or datetime.datetime.now(
+        datetime.UTC
+    )
+    if _client_has_current_version(cached_etag, cached_last_modified):
+        return _make_feed_304(cached_etag, cached_last_modified)
 
     # Don't block the response on an upstream RSS fetch. The scheduled
     # `refresh_all_feeds` job is the primary freshness source; we additionally
@@ -534,6 +614,7 @@ def get_feed(f_id: int) -> Response:
 
     response = make_response(xml_content)
     response.headers["Content-Type"] = "application/rss+xml"
+    _apply_feed_response_headers(response, cached_etag, cached_last_modified)
     return response
 
 
@@ -736,10 +817,18 @@ def get_feed_by_alt_or_url(something_or_rss: str) -> Response:
             pass
     feed = Feed.query.filter_by(rss_url=something_or_rss).first()
     if feed:
+        cached_etag = _compute_feed_etag(feed)
+        cached_last_modified = _aware_utc(
+            feed.last_changed_at
+        ) or datetime.datetime.now(datetime.UTC)
+        if _client_has_current_version(cached_etag, cached_last_modified):
+            return _make_feed_304(cached_etag, cached_last_modified)
+
         _maybe_record_client_poll(feed.id)
         xml_content = generate_feed_xml(feed)
         response = make_response(xml_content)
         response.headers["Content-Type"] = "application/rss+xml"
+        _apply_feed_response_headers(response, cached_etag, cached_last_modified)
         return response
 
     return make_response(("Feed not found", 404))
@@ -878,15 +967,26 @@ def get_user_aggregate_feed(user_id: int) -> Response:
     if not user:
         if user_id == 0 and not is_auth_enabled():
             # Support anonymous aggregate feed when auth is disabled
+            etag = _compute_aggregate_etag(None)
+            last_modified = get_aggregate_feed_last_changed_at(None)
+            if _client_has_current_version(etag, last_modified):
+                return _make_feed_304(etag, last_modified)
             xml_content = generate_aggregate_feed_xml(None)
             response = make_response(xml_content)
             response.headers["Content-Type"] = "application/rss+xml"
+            _apply_feed_response_headers(response, etag, last_modified)
             return response
         return make_response(("User not found", 404))
+
+    etag = _compute_aggregate_etag(user)
+    last_modified = get_aggregate_feed_last_changed_at(user)
+    if _client_has_current_version(etag, last_modified):
+        return _make_feed_304(etag, last_modified)
 
     xml_content = generate_aggregate_feed_xml(user)
     response = make_response(xml_content)
     response.headers["Content-Type"] = "application/rss+xml"
+    _apply_feed_response_headers(response, etag, last_modified)
     return response
 
 

@@ -46,6 +46,208 @@ def _format_itunes_duration(duration_seconds: int) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
+_DEFAULT_RSS_LANGUAGE = "en-us"
+_DEFAULT_ITUNES_EXPLICIT = "false"
+_DEFAULT_ITUNES_TYPE = "episodic"
+_DEFAULT_ITUNES_CATEGORIES: list[dict[str, Any]] = [
+    {"text": "Society & Culture", "subs": []}
+]
+
+
+def _normalize_itunes_explicit(value: Any) -> str | None:
+    """Normalize upstream explicit values to Apple's true/false strings."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    raw = str(value).strip().lower()
+    if not raw:
+        return None
+    if raw in {"yes", "true", "explicit"}:
+        return "true"
+    if raw in {"no", "false", "clean"}:
+        return "false"
+    return None
+
+
+def _normalize_itunes_type(value: Any) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip().lower()
+    if raw in {"episodic", "serial"}:
+        return raw
+    return None
+
+
+def _extract_itunes_categories(feed_meta: Any) -> list[dict[str, Any]]:
+    """Build itunes category list from feedparser tags (usually flat)."""
+    categories: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for tag in feed_meta.get("tags") or []:
+        term = str(tag.get("term") or "").strip()
+        if not term:
+            continue
+        scheme = str(tag.get("scheme") or "").lower()
+        if scheme and "itunes" not in scheme and "apple" not in scheme:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        categories.append({"text": term, "subs": []})
+    return categories
+
+
+def _serialize_itunes_categories(categories: list[dict[str, Any]]) -> str:
+    return json.dumps(categories, ensure_ascii=False)
+
+
+def _load_itunes_categories(raw: str | None) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    categories: list[dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        subs_raw = item.get("subs") or []
+        subs = (
+            [str(s).strip() for s in subs_raw if str(s).strip()]
+            if isinstance(subs_raw, list)
+            else []
+        )
+        categories.append({"text": text, "subs": subs})
+    return categories
+
+
+def extract_upstream_channel_metadata(feed_meta: Any) -> dict[str, Any]:
+    """Pull Apple/RSS channel fields from a feedparser feed dict."""
+    metadata: dict[str, Any] = {}
+
+    language = str(feed_meta.get("language") or "").strip()
+    if language:
+        metadata["rss_language"] = language
+
+    explicit = _normalize_itunes_explicit(feed_meta.get("itunes_explicit"))
+    if explicit is not None:
+        metadata["itunes_explicit"] = explicit
+
+    itunes_type = _normalize_itunes_type(feed_meta.get("itunes_type"))
+    if itunes_type is not None:
+        metadata["itunes_type"] = itunes_type
+
+    categories = _extract_itunes_categories(feed_meta)
+    if categories:
+        metadata["itunes_categories"] = _serialize_itunes_categories(categories)
+
+    return metadata
+
+
+def _publish_itunes_categories(handler: Any, categories: list[dict[str, Any]]) -> None:
+    for category in categories:
+        text = category.get("text") or ""
+        if not text:
+            continue
+        handler.startElement("itunes:category", {"text": text})
+        for sub in category.get("subs") or []:
+            if not sub:
+                continue
+            handler.startElement("itunes:category", {"text": sub})
+            handler.endElement("itunes:category")
+        handler.endElement("itunes:category")
+
+
+class ItunesRSS2(PyRSS2Gen.RSS2):
+    """RSS2 channel with Apple Podcasts extensions."""
+
+    def __init__(
+        self,
+        *args: Any,
+        itunes_author: str | None = None,
+        itunes_image_url: str | None = None,
+        itunes_explicit: str | None = None,
+        itunes_type: str | None = None,
+        itunes_categories: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.itunes_author = itunes_author
+        self.itunes_image_url = itunes_image_url
+        self.itunes_explicit = itunes_explicit
+        self.itunes_type = itunes_type
+        self.itunes_categories = itunes_categories or []
+        super().__init__(*args, **kwargs)
+
+    def publish_extensions(self, handler: Any) -> None:
+        if self.itunes_author:
+            handler.startElement("itunes:author", {})
+            handler.characters(self.itunes_author)
+            handler.endElement("itunes:author")
+        if self.itunes_image_url:
+            handler.startElement("itunes:image", {"href": self.itunes_image_url})
+            handler.endElement("itunes:image")
+        _publish_itunes_categories(handler, self.itunes_categories)
+        if self.itunes_explicit:
+            handler.startElement("itunes:explicit", {})
+            handler.characters(self.itunes_explicit)
+            handler.endElement("itunes:explicit")
+        if self.itunes_type:
+            handler.startElement("itunes:type", {})
+            handler.characters(self.itunes_type)
+            handler.endElement("itunes:type")
+        super().publish_extensions(handler)
+
+
+def _channel_itunes_fields(feed: Feed) -> dict[str, Any]:
+    categories = _load_itunes_categories(getattr(feed, "itunes_categories", None))
+    if not categories:
+        categories = list(_DEFAULT_ITUNES_CATEGORIES)
+    return {
+        "language": getattr(feed, "rss_language", None) or _DEFAULT_RSS_LANGUAGE,
+        "itunes_author": (feed.author or "").strip() or None,
+        "itunes_image_url": feed.image_url,
+        "itunes_explicit": getattr(feed, "itunes_explicit", None)
+        or _DEFAULT_ITUNES_EXPLICIT,
+        "itunes_type": getattr(feed, "itunes_type", None) or _DEFAULT_ITUNES_TYPE,
+        "itunes_categories": categories,
+    }
+
+
+def _feed_last_changed_at_aware(feed: Feed) -> datetime.datetime:
+    """Return `feed.last_changed_at` as an aware UTC datetime."""
+    raw = getattr(feed, "last_changed_at", None)
+    if raw is None:
+        return datetime.datetime.now(datetime.UTC)
+    if raw.tzinfo is None:
+        return raw.replace(tzinfo=datetime.UTC)
+    return raw.astimezone(datetime.UTC)
+
+
+def get_aggregate_feed_last_changed_at(user: User | None) -> datetime.datetime:
+    """Return the max `last_changed_at` across feeds in this user's aggregate."""
+    if not current_app.config.get("REQUIRE_AUTH") or user is None:
+        latest = db.session.query(db.func.max(Feed.last_changed_at)).scalar()
+    else:
+        latest = (
+            db.session.query(db.func.max(Feed.last_changed_at))
+            .join(UserFeed, UserFeed.feed_id == Feed.id)
+            .filter(UserFeed.user_id == user.id)
+            .scalar()
+        )
+    if latest is None:
+        return datetime.datetime.now(datetime.UTC)
+    if latest.tzinfo is None:
+        return latest.replace(tzinfo=datetime.UTC)
+    return latest.astimezone(datetime.UTC)
+
+
 def _parse_duration_seconds(value: Any) -> int | None:
     if value is None:
         return None
@@ -374,16 +576,45 @@ def fetch_feed(url: str) -> feedparser.FeedParserDict:
     return feed_data
 
 
-def refresh_feed(feed: Feed) -> None:
-    logger.info(f"Refreshing feed with ID: {feed.id}")
-    feed_data = fetch_feed(feed.rss_url)
+def _channel_field_updates(feed: Feed, channel: Any) -> dict[str, Any]:
+    """Diff upstream channel metadata against the stored Feed row."""
+    updates: dict[str, Any] = {}
 
-    updates = {}
-    image_info = feed_data.feed.get("image")
+    new_title = str(getattr(channel, "title", "") or "").strip()
+    if new_title and feed.title != new_title:
+        updates["title"] = new_title
+
+    new_description = getattr(channel, "description", "") or ""
+    if feed.description != new_description:
+        updates["description"] = new_description
+
+    new_author = getattr(channel, "author", "") or ""
+    if feed.author != new_author:
+        updates["author"] = new_author
+
+    image_info = channel.get("image") if hasattr(channel, "get") else None
+    if not image_info:
+        image_obj = getattr(channel, "image", None)
+        if image_obj is not None:
+            href = getattr(image_obj, "href", None)
+            image_info = {"href": href} if href else None
     if image_info and "href" in image_info:
         new_image_url = image_info["href"]
         if feed.image_url != new_image_url:
             updates["image_url"] = new_image_url
+
+    for key, value in extract_upstream_channel_metadata(channel).items():
+        if getattr(feed, key, None) != value:
+            updates[key] = value
+
+    return updates
+
+
+def refresh_feed(feed: Feed) -> None:
+    logger.info(f"Refreshing feed with ID: {feed.id}")
+    feed_data = fetch_feed(feed.rss_url)
+
+    updates = _channel_field_updates(feed, feed_data.feed)
 
     existing_posts = {post.guid: post for post in feed.posts}  # type: ignore[attr-defined]
     oldest_post = min(
@@ -510,6 +741,7 @@ def add_feed(
             .replace(tzinfo=None)
             .isoformat(),
         }
+        feed_dict.update(extract_upstream_channel_metadata(feed_data.feed))
         if language is not None:
             feed_dict["language"] = language
         if prompt_tag_id is not None:
@@ -578,10 +810,12 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):
         pubDate: str | None,
         image_url: str | None = None,
         duration_seconds: int | None = None,
+        itunes_explicit: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.image_url = image_url
         self.duration_seconds = duration_seconds
+        self.itunes_explicit = itunes_explicit
         super().__init__(
             title=title,
             enclosure=enclosure,
@@ -599,6 +833,10 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):
             handler.startElement("itunes:duration", {})
             handler.characters(_format_itunes_duration(self.duration_seconds))
             handler.endElement("itunes:duration")
+        if self.itunes_explicit:
+            handler.startElement("itunes:explicit", {})
+            handler.characters(self.itunes_explicit)
+            handler.endElement("itunes:explicit")
         _publish_cdata_opt_element(handler, "content:encoded", self.description)
         super().publish_extensions(handler)
 
@@ -669,9 +907,18 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
         title = f"[{post.feed.title}] {title}"
 
     duration_seconds = _feed_item_duration_seconds(post)
+    feed = getattr(post, "feed", None)
+    author = (feed.author or "").strip() if feed is not None else ""
+    itunes_explicit = (
+        getattr(feed, "itunes_explicit", None) or _DEFAULT_ITUNES_EXPLICIT
+        if feed is not None
+        else _DEFAULT_ITUNES_EXPLICIT
+    )
 
     item = ItunesRSSItem(
         title=title,
+        link=audio_url,
+        author=author or None,
         enclosure=PyRSS2Gen.Enclosure(
             url=audio_url,
             type="audio/mpeg",
@@ -682,6 +929,7 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
         pubDate=_format_pub_date(post.release_date),
         image_url=post.image_url,
         duration_seconds=duration_seconds,
+        itunes_explicit=itunes_explicit,
     )
 
     return item
@@ -719,15 +967,22 @@ def generate_feed_xml(feed: Feed) -> Any:
     base_url = _get_base_url()
     link = _append_feed_token_params(f"{base_url}/feed/{feed.id}")
 
-    last_build_date = format_datetime(datetime.datetime.now(datetime.UTC))
+    last_build_date = format_datetime(_feed_last_changed_at_aware(feed))
+    itunes_fields = _channel_itunes_fields(feed)
 
-    rss_feed = PyRSS2Gen.RSS2(
+    rss_feed = ItunesRSS2(
         title=_format_feed_rss_title(feed.title),
         link=link,
         description=_normalize_feed_text(feed.description),
+        language=itunes_fields["language"],
         lastBuildDate=last_build_date,
         image=PyRSS2Gen.Image(url=feed.image_url, title=feed.title, link=link),
         items=items,
+        itunes_author=itunes_fields["itunes_author"],
+        itunes_image_url=itunes_fields["itunes_image_url"],
+        itunes_explicit=itunes_fields["itunes_explicit"],
+        itunes_type=itunes_fields["itunes_type"],
+        itunes_categories=itunes_fields["itunes_categories"],
     )
 
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"
@@ -749,7 +1004,7 @@ def generate_aggregate_feed_xml(user: User | None) -> Any:
     base_url = _get_base_url()
     link = _append_feed_token_params(f"{base_url}/feed/user/{user_id}")
 
-    last_build_date = format_datetime(datetime.datetime.now(datetime.UTC))
+    last_build_date = format_datetime(get_aggregate_feed_last_changed_at(user))
 
     if current_app.config.get("REQUIRE_AUTH") and user:
         feed_title = f"Podly Podcasts - {user.username}"
@@ -760,17 +1015,24 @@ def generate_aggregate_feed_xml(user: User | None) -> Any:
             "Aggregate feed - Last 3 processed episodes from each subscribed feed."
         )
 
-    rss_feed = PyRSS2Gen.RSS2(
+    image_url = f"{base_url}/static/images/logos/manifest-icon-512.maskable.png"
+    rss_feed = ItunesRSS2(
         title=feed_title,
         link=link,
         description=feed_description,
+        language=_DEFAULT_RSS_LANGUAGE,
         lastBuildDate=last_build_date,
         items=items,
         image=PyRSS2Gen.Image(
-            url=f"{base_url}/static/images/logos/manifest-icon-512.maskable.png",
+            url=image_url,
             title=feed_title,
             link=link,
         ),
+        itunes_author="Podly",
+        itunes_image_url=image_url,
+        itunes_explicit=_DEFAULT_ITUNES_EXPLICIT,
+        itunes_type=_DEFAULT_ITUNES_TYPE,
+        itunes_categories=list(_DEFAULT_ITUNES_CATEGORIES),
     )
 
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"

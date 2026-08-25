@@ -46,6 +46,8 @@ class MockPost:
         image_url=None,
         whitelisted=False,
         processed_audio_path=None,
+        feed=None,
+        chapter_data=None,
     ):
         self.id = id
         self.title = title
@@ -58,6 +60,8 @@ class MockPost:
         self.image_url = image_url
         self.whitelisted = whitelisted
         self.processed_audio_path = processed_audio_path
+        self.feed = feed
+        self.chapter_data = chapter_data
         self._audio_len_bytes = 1024
         self.whitelisted = False
 
@@ -76,6 +80,11 @@ class MockFeed:
         author="Test Author",
         rss_url="https://example.com/feed.xml",
         image_url="https://example.com/image.jpg",
+        rss_language=None,
+        itunes_explicit=None,
+        itunes_type=None,
+        itunes_categories=None,
+        last_changed_at=None,
     ):
         self.id = id
         self.title = title
@@ -83,6 +92,11 @@ class MockFeed:
         self.author = author
         self.rss_url = rss_url
         self.image_url = image_url
+        self.rss_language = rss_language
+        self.itunes_explicit = itunes_explicit
+        self.itunes_type = itunes_type
+        self.itunes_categories = itunes_categories
+        self.last_changed_at = last_changed_at
         self.posts = []
         self.user_feeds = []
         self.auto_whitelist_new_episodes_override = None
@@ -771,6 +785,7 @@ def test_feed_item(mock_post, app):
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
     assert result.guid == mock_post.guid
+    assert result.link == "http://podly.com:5001/post/test-guid.mp3"
 
     # Check enclosure
     enclosure = result.enclosure
@@ -1140,7 +1155,7 @@ def test_get_base_url_localhost():
 
 @mock.patch("app.feeds.feed_item")
 @mock.patch("app.feeds.PyRSS2Gen.Image")
-@mock.patch("app.feeds.PyRSS2Gen.RSS2")
+@mock.patch("app.feeds.ItunesRSS2")
 def test_generate_feed_xml_filters_processed_whitelisted(
     mock_rss_2, mock_image, mock_feed_item, app
 ):
@@ -1201,7 +1216,7 @@ def test_generate_feed_xml_filters_processed_whitelisted(
 
 @mock.patch("app.feeds.feed_item")
 @mock.patch("app.feeds.PyRSS2Gen.Image")
-@mock.patch("app.feeds.PyRSS2Gen.RSS2")
+@mock.patch("app.feeds.ItunesRSS2")
 def test_generate_feed_xml_includes_all_when_autoprocess_enabled(
     mock_rss_2, mock_image, mock_feed_item, app
 ):
@@ -1264,7 +1279,7 @@ def test_generate_feed_xml_includes_all_when_autoprocess_enabled(
 
 @mock.patch("app.feeds.feed_item")
 @mock.patch("app.feeds.PyRSS2Gen.Image")
-@mock.patch("app.feeds.PyRSS2Gen.RSS2")
+@mock.patch("app.feeds.ItunesRSS2")
 @pytest.mark.parametrize(
     ("prefix", "expected_title"),
     [
@@ -1627,3 +1642,115 @@ def test_update_feed_settings_action_clears_language(app):
         update_feed_settings_action({"feed_id": feed.id, "language": None})
         db.session.refresh(feed)
         assert feed.language is None
+
+
+def test_extract_upstream_channel_metadata_from_feedparser_tags():
+    from app.feeds import extract_upstream_channel_metadata
+
+    feed_meta = {
+        "language": "en-us",
+        "itunes_explicit": "false",
+        "itunes_type": "episodic",
+        "tags": [
+            {"term": "History", "scheme": "http://www.itunes.com/", "label": None},
+            {
+                "term": "Society & Culture",
+                "scheme": "http://www.itunes.com/",
+                "label": None,
+            },
+        ],
+    }
+    metadata = extract_upstream_channel_metadata(feed_meta)
+    assert metadata["rss_language"] == "en-us"
+    assert metadata["itunes_explicit"] == "false"
+    assert metadata["itunes_type"] == "episodic"
+    assert "History" in metadata["itunes_categories"]
+    assert "Society & Culture" in metadata["itunes_categories"]
+
+
+def test_generate_feed_xml_emits_apple_channel_and_item_tags(app, monkeypatch):
+    with app.app_context():
+        feed = Feed(
+            title="History Show",
+            rss_url="http://example.com/history.rss",
+            author="Kathy Kenzora",
+            description="A show",
+            image_url="https://example.com/art.jpg",
+            rss_language="en-us",
+            itunes_explicit="false",
+            itunes_type="episodic",
+            itunes_categories='[{"text": "History", "subs": []}]',
+        )
+        db.session.add(feed)
+        db.session.commit()
+        post = Post(
+            feed_id=feed.id,
+            guid="ep-guid-1",
+            title="Episode One",
+            download_url="http://example.com/ep1.mp3",
+            description="<p>Hello</p>",
+            image_url="https://example.com/ep.jpg",
+            duration=3600,
+            release_date=datetime.datetime(2026, 8, 1, 12, 0),
+        )
+        db.session.add(post)
+        db.session.commit()
+        db.session.refresh(feed)
+
+        monkeypatch.setattr("app.feeds._get_base_url", lambda: "http://test")
+        monkeypatch.setattr(
+            "app.feeds.config",
+            type(
+                "Cfg", (), {"autoprocess_on_download": True, "feed_title_prefix": ""}
+            )(),
+        )
+
+        xml_bytes = generate_feed_xml(feed)
+        xml = xml_bytes.decode("utf-8") if isinstance(xml_bytes, bytes) else xml_bytes
+
+        assert "<language>en-us</language>" in xml
+        assert "<itunes:author>Kathy Kenzora</itunes:author>" in xml
+        assert 'itunes:image href="https://example.com/art.jpg"' in xml
+        assert 'itunes:category text="History"' in xml
+        assert "<itunes:explicit>false</itunes:explicit>" in xml
+        assert "<itunes:type>episodic</itunes:type>" in xml
+        assert "<link>http://test/post/ep-guid-1.mp3</link>" in xml
+        assert "<author>Kathy Kenzora</author>" in xml
+
+
+def test_generate_feed_xml_uses_fallbacks_when_itunes_metadata_missing(
+    app, monkeypatch
+):
+    with app.app_context():
+        feed = Feed(
+            title="Bare Feed",
+            rss_url="http://example.com/bare.rss",
+            image_url="https://example.com/bare.jpg",
+        )
+        db.session.add(feed)
+        db.session.commit()
+        post = Post(
+            feed_id=feed.id,
+            guid="bare-guid",
+            title="Bare Ep",
+            download_url="http://example.com/bare.mp3",
+        )
+        db.session.add(post)
+        db.session.commit()
+        db.session.refresh(feed)
+
+        monkeypatch.setattr("app.feeds._get_base_url", lambda: "http://test")
+        monkeypatch.setattr(
+            "app.feeds.config",
+            type(
+                "Cfg", (), {"autoprocess_on_download": True, "feed_title_prefix": ""}
+            )(),
+        )
+
+        xml_bytes = generate_feed_xml(feed)
+        xml = xml_bytes.decode("utf-8") if isinstance(xml_bytes, bytes) else xml_bytes
+
+        assert "<language>en-us</language>" in xml
+        assert 'itunes:category text="Society &amp; Culture"' in xml
+        assert "<itunes:explicit>false</itunes:explicit>" in xml
+        assert "<itunes:type>episodic</itunes:type>" in xml

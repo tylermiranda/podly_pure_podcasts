@@ -50,9 +50,21 @@ class Feed(db.Model):  # type: ignore[name-defined, misc]
     enable_llm_chapter_fallback_tagging = db.Column(db.Boolean, nullable=True)
     auto_whitelist_new_episodes_override = db.Column(db.Boolean, nullable=True)
     language = db.Column(db.Text, nullable=True)
+    # RSS channel <language> from upstream (ISO 639 / en-us). Distinct from
+    # `language`, which is the Whisper transcription override.
+    rss_language = db.Column(db.Text, nullable=True)
+    # Apple Podcasts parental advisory for the show: "true" or "false".
+    itunes_explicit = db.Column(db.String(8), nullable=True)
+    # Apple show type: "episodic" or "serial".
+    itunes_type = db.Column(db.String(16), nullable=True)
+    # JSON list of {"text": "...", "subs": ["..."]} for itunes:category.
+    itunes_categories = db.Column(db.Text, nullable=True)
     # When Podly last successfully fetched this feed's RSS (UTC naive).
     # Null until the first successful fetch/refresh after the column was added.
     last_fetched_at = db.Column(db.DateTime, nullable=True)
+    # Bumped when channel metadata or posts change. Used as lastBuildDate and
+    # as an input to the feed response ETag for 304 short-circuit.
+    last_changed_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)
     # When a podcast client last requested this feed's Podly RSS URL (UTC naive).
     last_client_polled_at = db.Column(db.DateTime, nullable=True)
     # Normalized podcast-client display name derived from User-Agent.
