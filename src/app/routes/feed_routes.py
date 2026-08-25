@@ -32,7 +32,6 @@ from app.auth.service import update_user_last_active
 from app.client_user_agent import normalize_client_user_agent
 from app.extensions import db
 from app.feeds import (
-    _append_feed_token_params,
     _get_base_url,
     _normalize_feed_text,
     add_or_refresh_feed,
@@ -522,7 +521,7 @@ def _spawn_async_refresh(app: Flask, feed_id: int) -> None:
 # Bump when generated feed XML shape changes without a DB content write
 # (e.g. author/guid serialization). Otherwise clients with If-None-Match keep
 # a stale body forever via 304 even though the on-disk feed is different.
-_FEED_XML_ETAG_VERSION = "5"
+_FEED_XML_ETAG_VERSION = "6"
 
 
 def _aware_utc(value: datetime.datetime | None) -> datetime.datetime | None:
@@ -608,7 +607,7 @@ def get_feed_home(f_id: int) -> Response:
 
     feed = Feed.query.get_or_404(f_id)
     base_url = _get_base_url()
-    rss_href = _append_feed_token_params(f"{base_url}/feed/{feed.id}")
+    rss_href = f"{base_url}/feed/{feed.id}"
     title = feed.title or "Podcast"
     description = _normalize_feed_text(feed.description) or ""
     image_url = feed.image_url or ""

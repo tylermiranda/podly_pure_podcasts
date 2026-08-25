@@ -178,6 +178,7 @@ class ItunesRSS2(PyRSS2Gen.RSS2):
         itunes_categories: list[dict[str, Any]] | None = None,
         itunes_owner_name: str | None = None,
         itunes_owner_email: str | None = None,
+        atom_self_link: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.itunes_author = itunes_author
@@ -187,6 +188,7 @@ class ItunesRSS2(PyRSS2Gen.RSS2):
         self.itunes_categories = itunes_categories or []
         self.itunes_owner_name = itunes_owner_name
         self.itunes_owner_email = itunes_owner_email
+        self.atom_self_link = atom_self_link
         super().__init__(*args, **kwargs)
 
     def publish_extensions(self, handler: Any) -> None:
@@ -217,6 +219,16 @@ class ItunesRSS2(PyRSS2Gen.RSS2):
                 handler.characters(self.itunes_owner_email)
                 handler.endElement("itunes:email")
             handler.endElement("itunes:owner")
+        if self.atom_self_link:
+            handler.startElement(
+                "atom:link",
+                {
+                    "href": self.atom_self_link,
+                    "rel": "self",
+                    "type": "application/rss+xml",
+                },
+            )
+            handler.endElement("atom:link")
         super().publish_extensions(handler)
 
 
@@ -1008,9 +1020,10 @@ def generate_feed_xml(feed: Feed) -> Any:
     items = [feed_item(post) for post in posts]
 
     base_url = _get_base_url()
-    # Channel <link> must be an HTML homepage (not the RSS URL). Google/YTM
-    # expect this page to advertise the feed via rel=alternate.
-    link = _append_feed_token_params(f"{base_url}/feed/{feed.id}/home")
+    # Channel <link> is the public HTML homepage (no auth tokens). Google verifies
+    # homepage ↔ feed without query params; tokens stay on atom:self + enclosures.
+    link = f"{base_url}/feed/{feed.id}/home"
+    self_link = _append_feed_token_params(f"{base_url}/feed/{feed.id}")
 
     last_build_date = format_datetime(_feed_last_changed_at_aware(feed))
     itunes_fields = _channel_itunes_fields(feed)
@@ -1030,8 +1043,10 @@ def generate_feed_xml(feed: Feed) -> Any:
         itunes_categories=itunes_fields["itunes_categories"],
         itunes_owner_name=itunes_fields["itunes_owner_name"],
         itunes_owner_email=itunes_fields["itunes_owner_email"],
+        atom_self_link=self_link,
     )
 
+    rss_feed.rss_attrs["xmlns:atom"] = "http://www.w3.org/2005/Atom"
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"
     rss_feed.rss_attrs["xmlns:content"] = "http://purl.org/rss/1.0/modules/content/"
     rss_feed.rss_attrs["xmlns:googleplay"] = (

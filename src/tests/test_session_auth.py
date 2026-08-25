@@ -136,6 +136,59 @@ def test_feed_requires_token_when_no_session(auth_app: Flask) -> None:
     assert "Invalid or missing feed token" in unauthorized.get_data(as_text=True)
 
 
+def test_feed_home_is_public_without_token(auth_app: Flask) -> None:
+    client = auth_app.test_client()
+    with auth_app.app_context():
+        feed = Feed(title="Public Show", rss_url="https://example.com/public.xml")
+        db.session.add(feed)
+        db.session.commit()
+        feed_id = feed.id
+
+    response = client.get(f"/feed/{feed_id}/home")
+    assert response.status_code == 200
+    assert "text/html" in (response.headers.get("Content-Type") or "")
+    assert "Public Show" in response.get_data(as_text=True)
+
+
+def test_episode_landing_is_public_without_token(auth_app: Flask) -> None:
+    client = auth_app.test_client()
+    with auth_app.app_context():
+        feed = Feed(title="Show", rss_url="https://example.com/show.xml")
+        db.session.add(feed)
+        db.session.commit()
+        post = Post(
+            feed_id=feed.id,
+            guid="public-ep",
+            download_url="https://example.com/ep.mp3",
+            title="Public Episode",
+        )
+        db.session.add(post)
+        db.session.commit()
+
+    from app.routes.post_routes import post_bp
+
+    if "post" not in auth_app.blueprints:
+        auth_app.register_blueprint(post_bp)
+
+    response = client.get("/post/public-ep")
+    assert response.status_code == 200
+    assert "Public Episode" in response.get_data(as_text=True)
+
+
+def test_podcast_crawler_bypasses_feed_token_requirement(auth_app: Flask) -> None:
+    client = auth_app.test_client()
+    blocked = client.get("/feed/1")
+    assert blocked.status_code == 401
+
+    response = client.get(
+        "/feed/1",
+        headers={
+            "User-Agent": "FeedFetcher-Google; (+http://www.google.com/feedfetcher.html)"
+        },
+    )
+    assert response.status_code != 401
+
+
 def test_share_link_generates_token_and_allows_query_access(auth_app: Flask) -> None:
     client = auth_app.test_client()
     with auth_app.app_context():

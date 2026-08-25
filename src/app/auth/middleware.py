@@ -55,12 +55,23 @@ _PUBLIC_EXTENSIONS: tuple[str, ...] = (
 
 _TOKEN_PROTECTED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/feed/[^/]+$"),
-    # HTML show homepage for channel <link> (Google / YTM reciprocal discovery)
-    re.compile(r"^/feed/[^/]+/home$"),
     re.compile(r"^/feed/user/[^/]+$"),
     re.compile(r"^/api/posts/[^/]+/(audio|download(?:/original)?)$"),
-    # Episode landing HTML + MP3 enclosures (feed token in query)
+    # MP3 enclosures (episode HTML + show home are public for podcast discovery)
     re.compile(r"^/post/[^/]+(?:\.mp3|/original\.mp3)?$"),
+)
+
+_PUBLIC_PATH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Channel <link> and reciprocal homepage (Google strips query params here)
+    re.compile(r"^/feed/\d+/home$"),
+    re.compile(r"^/post/[^/]+$"),
+)
+
+_PODCAST_CRAWLER_UA_MARKERS: tuple[str, ...] = (
+    "FeedFetcher-Google",
+    "Googlebot",
+    "google-xrawler",
+    "Google-Podcast",
 )
 
 
@@ -89,6 +100,12 @@ def init_auth_middleware(app: Any) -> None:
             return None
 
         if _is_token_protected_endpoint(request.path):
+            if request.method == "GET" and _is_podcast_crawler():
+                failure_rate_limiter.register_success(client_identifier)
+                g.current_user = None
+                g.feed_token = None
+                return None
+
             retry_after = failure_rate_limiter.retry_after(client_identifier)
             if retry_after:
                 return _too_many_requests(retry_after)
@@ -143,6 +160,11 @@ def _is_public_request(path: str) -> bool:
     if path in _PUBLIC_PATHS:
         return True
 
+    if any(pattern.match(path) for pattern in _PUBLIC_PATH_PATTERNS):
+        if path.startswith("/post/") and path.endswith(".mp3"):
+            return False
+        return True
+
     if any(path.startswith(prefix) for prefix in _PUBLIC_PREFIXES):
         return True
 
@@ -150,6 +172,11 @@ def _is_public_request(path: str) -> bool:
         return True
 
     return False
+
+
+def _is_podcast_crawler() -> bool:
+    user_agent = request.headers.get("User-Agent", "")
+    return any(marker in user_agent for marker in _PODCAST_CRAWLER_UA_MARKERS)
 
 
 def _json_unauthorized(message: str = "Authentication required.") -> Response:

@@ -250,4 +250,5 @@ def test_get_feed_home_returns_html_with_rss_alternate(app):
     assert 'rel="alternate"' in body
     assert 'type="application/rss+xml"' in body
     assert f'href="http://test/feed/{feed_id}"' in body
+    assert "feed_token" not in body
     assert "https://example.com/cover.jpg" in body

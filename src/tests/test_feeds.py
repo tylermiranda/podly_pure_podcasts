@@ -1731,9 +1731,15 @@ def test_generate_feed_xml_emits_apple_channel_and_item_tags(app, monkeypatch):
         assert "<itunes:owner>" in xml
         assert "<itunes:email>podly@tylermiranda.com</itunes:email>" in xml
         assert "xmlns:googleplay=" in xml
-        # Channel <link> is HTML homepage, not the RSS document itself.
+        # Channel <link> is tokenless public homepage; atom:self carries the feed URL.
         channel = xml.split("<item>", 1)[0]
         assert f"<link>http://test/feed/{feed.id}/home</link>" in channel
+        assert (
+            "feed_token" not in channel.split("<item>", 1)[0].split("</channel>", 1)[0]
+        )
+        assert 'rel="self"' in channel or "rel='self'" in channel
+        assert "atom:link" in channel
+        assert 'xmlns:atom="http://www.w3.org/2005/Atom"' in xml
         # RSS <author> must be an email; display names belong in itunes:author only.
         assert "<author>Kathy Kenzora</author>" not in xml
         assert 'guid isPermaLink="false">ep-guid-1</guid>' in xml
