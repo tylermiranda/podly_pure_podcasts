@@ -176,6 +176,8 @@ class ItunesRSS2(PyRSS2Gen.RSS2):
         itunes_explicit: str | None = None,
         itunes_type: str | None = None,
         itunes_categories: list[dict[str, Any]] | None = None,
+        itunes_owner_name: str | None = None,
+        itunes_owner_email: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.itunes_author = itunes_author
@@ -183,6 +185,8 @@ class ItunesRSS2(PyRSS2Gen.RSS2):
         self.itunes_explicit = itunes_explicit
         self.itunes_type = itunes_type
         self.itunes_categories = itunes_categories or []
+        self.itunes_owner_name = itunes_owner_name
+        self.itunes_owner_email = itunes_owner_email
         super().__init__(*args, **kwargs)
 
     def publish_extensions(self, handler: Any) -> None:
@@ -202,6 +206,17 @@ class ItunesRSS2(PyRSS2Gen.RSS2):
             handler.startElement("itunes:type", {})
             handler.characters(self.itunes_type)
             handler.endElement("itunes:type")
+        if self.itunes_owner_name or self.itunes_owner_email:
+            handler.startElement("itunes:owner", {})
+            if self.itunes_owner_name:
+                handler.startElement("itunes:name", {})
+                handler.characters(self.itunes_owner_name)
+                handler.endElement("itunes:name")
+            if self.itunes_owner_email:
+                handler.startElement("itunes:email", {})
+                handler.characters(self.itunes_owner_email)
+                handler.endElement("itunes:email")
+            handler.endElement("itunes:owner")
         super().publish_extensions(handler)
 
 
@@ -209,14 +224,19 @@ def _channel_itunes_fields(feed: Feed) -> dict[str, Any]:
     categories = _load_itunes_categories(getattr(feed, "itunes_categories", None))
     if not categories:
         categories = list(_DEFAULT_ITUNES_CATEGORIES)
+    author = (feed.author or "").strip() or None
+    # YouTube Music hangs on "Processing..." without itunes:owner/email (Acast has both).
+    owner_email = "podly@tylermiranda.com"
     return {
         "language": getattr(feed, "rss_language", None) or _DEFAULT_RSS_LANGUAGE,
-        "itunes_author": (feed.author or "").strip() or None,
+        "itunes_author": author,
         "itunes_image_url": feed.image_url,
         "itunes_explicit": getattr(feed, "itunes_explicit", None)
         or _DEFAULT_ITUNES_EXPLICIT,
         "itunes_type": getattr(feed, "itunes_type", None) or _DEFAULT_ITUNES_TYPE,
         "itunes_categories": categories,
+        "itunes_owner_name": author or "Podly",
+        "itunes_owner_email": owner_email,
     }
 
 
@@ -935,12 +955,12 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
         else _DEFAULT_ITUNES_EXPLICIT
     )
 
-    # Do not set item <link> to the enclosure MP3 URL. Acast/Apple use an
-    # episode webpage for <link>; reusing the audio URL caused YouTube Music to
-    # stop ingesting new items after we added it. Omitting <link> matches the
-    # last Podly shape YTM successfully refreshed (through 2026-08-21).
+    # Item <link> must be an episode webpage, not the enclosure MP3. YouTube Music
+    # stays on "Processing..." when link is missing or points at audio.
+    episode_link = _append_feed_token_params(f"{base_url}/post/{post.guid}")
     item = ItunesRSSItem(
         title=title,
+        link=episode_link,
         enclosure=PyRSS2Gen.Enclosure(
             url=audio_url,
             type="audio/mpeg",
@@ -1006,10 +1026,15 @@ def generate_feed_xml(feed: Feed) -> Any:
         itunes_explicit=itunes_fields["itunes_explicit"],
         itunes_type=itunes_fields["itunes_type"],
         itunes_categories=itunes_fields["itunes_categories"],
+        itunes_owner_name=itunes_fields["itunes_owner_name"],
+        itunes_owner_email=itunes_fields["itunes_owner_email"],
     )
 
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"
     rss_feed.rss_attrs["xmlns:content"] = "http://purl.org/rss/1.0/modules/content/"
+    rss_feed.rss_attrs["xmlns:googleplay"] = (
+        "http://www.google.com/schemas/play-podcasts/1.0"
+    )
 
     logger.info(f"XML generated for feed with ID: {feed.id}")
     return rss_feed.to_xml("utf-8")
@@ -1056,10 +1081,15 @@ def generate_aggregate_feed_xml(user: User | None) -> Any:
         itunes_explicit=_DEFAULT_ITUNES_EXPLICIT,
         itunes_type=_DEFAULT_ITUNES_TYPE,
         itunes_categories=list(_DEFAULT_ITUNES_CATEGORIES),
+        itunes_owner_name="Podly",
+        itunes_owner_email="podly@tylermiranda.com",
     )
 
     rss_feed.rss_attrs["xmlns:itunes"] = "http://www.itunes.com/dtds/podcast-1.0.dtd"
     rss_feed.rss_attrs["xmlns:content"] = "http://purl.org/rss/1.0/modules/content/"
+    rss_feed.rss_attrs["xmlns:googleplay"] = (
+        "http://www.google.com/schemas/play-podcasts/1.0"
+    )
 
     logger.info(f"Aggregate XML generated for: {username}")
     return rss_feed.to_xml("utf-8")

@@ -787,8 +787,8 @@ def test_feed_item(mock_post, app):
     assert isinstance(result.guid, PyRSS2Gen.Guid)
     assert result.guid.guid == mock_post.guid
     assert result.guid.isPermaLink is False
-    # Item link must not duplicate the enclosure MP3 (breaks YTM ingest).
-    assert result.link is None
+    # Episode webpage link (not the MP3 enclosure).
+    assert result.link == "http://podly.com:5001/post/test-guid"
 
     # Check enclosure
     enclosure = result.enclosure
@@ -1724,9 +1724,13 @@ def test_generate_feed_xml_emits_apple_channel_and_item_tags(app, monkeypatch):
         assert 'itunes:category text="History"' in xml
         assert "<itunes:explicit>false</itunes:explicit>" in xml
         assert "<itunes:type>episodic</itunes:type>" in xml
-        # Enclosure carries audio; item <link> must not be the MP3 URL.
+        # Enclosure carries audio; item <link> is the episode HTML page.
         assert 'enclosure url="http://test/post/ep-guid-1.mp3"' in xml
+        assert "<link>http://test/post/ep-guid-1</link>" in xml
         assert "<link>http://test/post/ep-guid-1.mp3</link>" not in xml
+        assert "<itunes:owner>" in xml
+        assert "<itunes:email>podly@tylermiranda.com</itunes:email>" in xml
+        assert "xmlns:googleplay=" in xml
         # RSS <author> must be an email; display names belong in itunes:author only.
         assert "<author>Kathy Kenzora</author>" not in xml
         assert 'guid isPermaLink="false">ep-guid-1</guid>' in xml

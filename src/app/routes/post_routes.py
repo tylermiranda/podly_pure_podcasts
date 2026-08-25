@@ -8,6 +8,7 @@ from typing import Any
 import flask
 from flask import Blueprint, g, jsonify, request, send_file
 from flask.typing import ResponseReturnValue
+from markupsafe import escape
 
 from app.auth.guards import require_admin
 from app.auth.service import update_user_last_active
@@ -1526,7 +1527,8 @@ def api_download_original_post(p_guid: str) -> flask.Response:
     return response
 
 
-# Legacy endpoints for backward compatibility
+# Legacy endpoints for backward compatibility.
+# Register .mp3 routes before the bare episode page so "guid.mp3" is not captured.
 @post_bp.route("/post/<string:p_guid>.mp3", methods=["GET"])
 def download_post_legacy(p_guid: str) -> ResponseReturnValue:
     return api_get_post_audio(p_guid)
@@ -1535,3 +1537,24 @@ def download_post_legacy(p_guid: str) -> ResponseReturnValue:
 @post_bp.route("/post/<string:p_guid>/original.mp3", methods=["GET"])
 def download_original_post_legacy(p_guid: str) -> flask.Response:
     return api_download_original_post(p_guid)
+
+
+@post_bp.route("/post/<string:p_guid>", methods=["GET"])
+def episode_landing(p_guid: str) -> flask.Response:
+    """Minimal HTML episode page for RSS item <link> (not the MP3 enclosure)."""
+    post = Post.query.filter_by(guid=p_guid).first()
+    if post is None:
+        return flask.make_response(("Episode not found", 404))
+
+    title = post.title or "Episode"
+    description = build_post_feed_description_html(post) or ""
+    # Keep markup minimal; podcast clients only need a resolvable HTML document.
+    body = (
+        "<!DOCTYPE html><html><head>"
+        f"<meta charset='utf-8'><title>{escape(title)}</title>"
+        "</head><body>"
+        f"<h1>{escape(title)}</h1>"
+        f"<div>{description}</div>"
+        "</body></html>"
+    )
+    return flask.Response(body, status=200, mimetype="text/html; charset=utf-8")

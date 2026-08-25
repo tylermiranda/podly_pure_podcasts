@@ -57,7 +57,8 @@ _TOKEN_PROTECTED_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/feed/[^/]+$"),
     re.compile(r"^/feed/user/[^/]+$"),
     re.compile(r"^/api/posts/[^/]+/(audio|download(?:/original)?)$"),
-    re.compile(r"^/post/[^/]+(?:\.mp3|/original\.mp3)$"),
+    # Episode landing HTML + MP3 enclosures (feed token in query)
+    re.compile(r"^/post/[^/]+(?:\.mp3|/original\.mp3)?$"),
 )
 
 
