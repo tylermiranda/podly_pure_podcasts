@@ -211,3 +211,17 @@ def test_get_feed_skips_xml_when_etag_matches(app):
         )
         assert second.status_code == 304
         assert mock_xml.call_count == 1
+
+
+def test_feed_etag_changes_when_xml_format_version_bumps(app):
+    """XML-shape-only fixes must invalidate cached ETags (no DB write required)."""
+    from app.routes import feed_routes
+
+    with app.app_context():
+        feed_id = _make_feed_with_post()
+        feed = db.session.get(Feed, feed_id)
+        assert feed is not None
+        etag_before = feed_routes._compute_feed_etag(feed)
+        with mock.patch.object(feed_routes, "_FEED_XML_ETAG_VERSION", "999"):
+            etag_after = feed_routes._compute_feed_etag(feed)
+        assert etag_before != etag_after

@@ -517,6 +517,12 @@ def _spawn_async_refresh(app: Flask, feed_id: int) -> None:
     ).start()
 
 
+# Bump when generated feed XML shape changes without a DB content write
+# (e.g. author/guid serialization). Otherwise clients with If-None-Match keep
+# a stale body forever via 304 even though the on-disk feed is different.
+_FEED_XML_ETAG_VERSION = "2"
+
+
 def _aware_utc(value: datetime.datetime | None) -> datetime.datetime | None:
     if value is None:
         return None
@@ -534,7 +540,8 @@ def _compute_feed_etag(feed: Feed) -> str:
     )
     last_changed = feed.last_changed_at or datetime.datetime.now(datetime.UTC)
     payload = (
-        f"{feed.id}:{last_changed.isoformat()}:{post_count or 0}:{max_post_id or 0}"
+        f"{_FEED_XML_ETAG_VERSION}:{feed.id}:"
+        f"{last_changed.isoformat()}:{post_count or 0}:{max_post_id or 0}"
     )
     return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
@@ -552,7 +559,10 @@ def _compute_aggregate_etag(user: User | None) -> str:
         )
     last_changed = get_aggregate_feed_last_changed_at(user)
     user_id = user.id if user else 0
-    payload = f"agg:{user_id}:{last_changed.isoformat()}:{','.join(map(str, feed_ids))}"
+    payload = (
+        f"agg:{_FEED_XML_ETAG_VERSION}:{user_id}:"
+        f"{last_changed.isoformat()}:{','.join(map(str, feed_ids))}"
+    )
     return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
