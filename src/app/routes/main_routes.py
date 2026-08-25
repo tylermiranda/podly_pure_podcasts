@@ -24,6 +24,22 @@ def health() -> flask.Response:
     return flask.Response("ok", status=200, mimetype="text/plain")
 
 
+@main_bp.route("/robots.txt")
+def robots_txt() -> flask.Response:
+    """Allow podcast clients / Google FeedFetcher to fetch feeds and enclosures."""
+    body = "\n".join(
+        [
+            "User-agent: *",
+            "Allow: /feed",
+            "Allow: /post",
+            "Allow: /health",
+            "Disallow: /",
+            "",
+        ]
+    )
+    return flask.Response(body, status=200, mimetype="text/plain; charset=utf-8")
+
+
 @main_bp.route("/")
 def index() -> flask.Response:
     """Serve the React app's index.html."""
