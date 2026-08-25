@@ -1055,9 +1055,8 @@ def test_feed_item_falls_back_to_processed_audio_duration(mock_post, app):
     assert "<itunes:duration>1:09:54</itunes:duration>" in xml
 
 
-def test_feed_item_prefers_processed_audio_duration_over_stored_duration(
-    mock_post, app
-):
+def test_feed_item_prefers_stored_duration_over_probing_processed_audio(mock_post, app):
+    """RSS generation must not ffprobe when post.duration is already set."""
     mock_post.duration = 3723
     mock_post.processed_audio_path = "/tmp/test-output.mp3"
 
@@ -1076,9 +1075,13 @@ def test_feed_item_prefers_processed_audio_duration_over_stored_duration(
     with (
         app.app_context(),
         mock.patch("app.feeds.request", mock_request),
-        mock.patch("app.feeds.get_audio_duration_ms", return_value=3_600_000),
+        mock.patch(
+            "app.feeds.get_audio_duration_ms", return_value=3_600_000
+        ) as mock_probe,
     ):
         item = feed_item(mock_post)
+
+    mock_probe.assert_not_called()
 
     rss = PyRSS2Gen.RSS2(
         title="Test Feed",
@@ -1091,7 +1094,7 @@ def test_feed_item_prefers_processed_audio_duration_over_stored_duration(
     xml = rss.to_xml("utf-8")
     if isinstance(xml, bytes):
         xml = xml.decode("utf-8")
-    assert "<itunes:duration>1:00:00</itunes:duration>" in xml
+    assert "<itunes:duration>1:02:03</itunes:duration>" in xml
 
 
 def test_get_base_url_without_reverse_proxy():

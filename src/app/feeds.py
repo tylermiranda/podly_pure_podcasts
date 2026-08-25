@@ -885,18 +885,25 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):
 
 
 def _feed_item_duration_seconds(post: Post) -> int | None:
+    """Return episode duration for itunes:duration without blocking on ffprobe.
+
+    Processing already writes the cut-audio length onto ``post.duration``. Probing
+    the MP3 on every RSS build saturates Waitress (often ``SERVER_THREADS=1``) and
+    makes the container look like it is restarting when health checks time out.
+    """
+    raw_duration = getattr(post, "duration", None)
+    if raw_duration is not None:
+        duration_seconds = int(raw_duration)
+        if duration_seconds > 0:
+            return duration_seconds
+
     processed_audio_path = getattr(post, "processed_audio_path", None)
     if processed_audio_path:
         duration_ms = get_audio_duration_ms(processed_audio_path)
         if duration_ms is not None and duration_ms > 0:
             return round(duration_ms / 1000.0)
 
-    raw_duration = getattr(post, "duration", None)
-    if raw_duration is None:
-        return None
-
-    duration_seconds = int(raw_duration)
-    return duration_seconds if duration_seconds > 0 else None
+    return None
 
 
 def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem:

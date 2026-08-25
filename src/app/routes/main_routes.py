@@ -18,6 +18,12 @@ logger = logging.getLogger("global_logger")
 main_bp = Blueprint("main", __name__)
 
 
+@main_bp.route("/health")
+def health() -> flask.Response:
+    """Liveness probe — keep this free of DB/audio work so Waitress stay responsive."""
+    return flask.Response("ok", status=200, mimetype="text/plain")
+
+
 @main_bp.route("/")
 def index() -> flask.Response:
     """Serve the React app's index.html."""

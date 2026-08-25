@@ -12,7 +12,7 @@ services:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
       - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:--1}
-      - SERVER_THREADS=${SERVER_THREADS:-1}
+      - SERVER_THREADS=${SERVER_THREADS:-4}
     restart: unless-stopped
     healthcheck:
       test:
@@ -20,12 +20,12 @@ services:
           "CMD",
           "python3",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/')",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health')",
         ]
       interval: 30s
-      timeout: 10s
+      timeout: 30s
       retries: 3
-      start_period: 10s
+      start_period: 60s
 
 networks:
   default:
