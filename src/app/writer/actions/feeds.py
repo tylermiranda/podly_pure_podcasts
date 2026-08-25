@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+import string
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -407,6 +408,18 @@ def _hash_token(secret_value: str) -> str:
     return hashlib.sha256(secret_value.encode("utf-8")).hexdigest()
 
 
+def _generate_feed_token_secret(nbytes: int = 18) -> str:
+    """Return a URL-safe secret without ``-`` / ``_``.
+
+    ``secrets.token_urlsafe`` uses base64url and can yield a leading ``-``, which
+    breaks paste-into-YouTube-Music (secret parsed as a flag / truncated).
+    """
+    alphabet = string.ascii_letters + string.digits
+    # Match token_urlsafe entropy roughly: 18 bytes ≈ 24 chars.
+    length = max(24, (nbytes * 4 + 2) // 3)
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
 def create_feed_access_token_action(params: dict[str, Any]) -> dict[str, Any]:
     user_id = params.get("user_id")
     feed_id = params.get("feed_id")
@@ -429,14 +442,14 @@ def create_feed_access_token_action(params: dict[str, Any]) -> dict[str, Any]:
         if existing.token_secret:
             return {"token_id": existing.token_id, "secret": existing.token_secret}
 
-        secret_value = secrets.token_urlsafe(18)
+        secret_value = _generate_feed_token_secret()
         existing.token_hash = _hash_token(secret_value)
         existing.token_secret = secret_value
         db.session.flush()
         return {"token_id": existing.token_id, "secret": secret_value}
 
     token_id = uuid.uuid4().hex
-    secret_value = secrets.token_urlsafe(18)
+    secret_value = _generate_feed_token_secret()
     token = FeedAccessToken(
         token_id=token_id,
         token_hash=_hash_token(secret_value),
