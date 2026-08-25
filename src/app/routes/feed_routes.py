@@ -520,7 +520,7 @@ def _spawn_async_refresh(app: Flask, feed_id: int) -> None:
 # Bump when generated feed XML shape changes without a DB content write
 # (e.g. author/guid serialization). Otherwise clients with If-None-Match keep
 # a stale body forever via 304 even though the on-disk feed is different.
-_FEED_XML_ETAG_VERSION = "2"
+_FEED_XML_ETAG_VERSION = "3"
 
 
 def _aware_utc(value: datetime.datetime | None) -> datetime.datetime | None:

@@ -928,9 +928,12 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
         else _DEFAULT_ITUNES_EXPLICIT
     )
 
+    # Do not set item <link> to the enclosure MP3 URL. Acast/Apple use an
+    # episode webpage for <link>; reusing the audio URL caused YouTube Music to
+    # stop ingesting new items after we added it. Omitting <link> matches the
+    # last Podly shape YTM successfully refreshed (through 2026-08-21).
     item = ItunesRSSItem(
         title=title,
-        link=audio_url,
         enclosure=PyRSS2Gen.Enclosure(
             url=audio_url,
             type="audio/mpeg",
