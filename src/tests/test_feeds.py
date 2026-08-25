@@ -784,7 +784,9 @@ def test_feed_item(mock_post, app):
     # Verify the result
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
-    assert result.guid == mock_post.guid
+    assert isinstance(result.guid, PyRSS2Gen.Guid)
+    assert result.guid.guid == mock_post.guid
+    assert result.guid.isPermaLink is False
     assert result.link == "http://podly.com:5001/post/test-guid.mp3"
 
     # Check enclosure
@@ -851,7 +853,9 @@ def test_feed_item_with_reverse_proxy(mock_post, app):
     # Verify the result
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
-    assert result.guid == mock_post.guid
+    assert isinstance(result.guid, PyRSS2Gen.Guid)
+    assert result.guid.guid == mock_post.guid
+    assert result.guid.isPermaLink is False
 
     # Check enclosure - should use HTTP/2 pseudo-headers
     enclosure = result.enclosure
@@ -885,7 +889,9 @@ def test_feed_item_with_reverse_proxy_custom_port(mock_post, app):
     # Verify the result
     assert isinstance(result, PyRSS2Gen.RSSItem)
     assert result.title == mock_post.title
-    assert result.guid == mock_post.guid
+    assert isinstance(result.guid, PyRSS2Gen.Guid)
+    assert result.guid.guid == mock_post.guid
+    assert result.guid.isPermaLink is False
 
     # Check enclosure - should use HTTPS with custom port
     enclosure = result.enclosure
@@ -1715,7 +1721,11 @@ def test_generate_feed_xml_emits_apple_channel_and_item_tags(app, monkeypatch):
         assert "<itunes:explicit>false</itunes:explicit>" in xml
         assert "<itunes:type>episodic</itunes:type>" in xml
         assert "<link>http://test/post/ep-guid-1.mp3</link>" in xml
-        assert "<author>Kathy Kenzora</author>" in xml
+        # RSS <author> must be an email; display names belong in itunes:author only.
+        assert "<author>Kathy Kenzora</author>" not in xml
+        assert 'guid isPermaLink="false">ep-guid-1</guid>' in xml
+        # Item-level itunes:author for clients that key off episode metadata.
+        assert xml.count("<itunes:author>Kathy Kenzora</itunes:author>") >= 2
 
 
 def test_generate_feed_xml_uses_fallbacks_when_itunes_metadata_missing(

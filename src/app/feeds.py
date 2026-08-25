@@ -806,16 +806,18 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):
         title: str,
         enclosure: PyRSS2Gen.Enclosure,
         description: str,
-        guid: str,
+        guid: str | PyRSS2Gen.Guid,
         pubDate: str | None,
         image_url: str | None = None,
         duration_seconds: int | None = None,
         itunes_explicit: str | None = None,
+        itunes_author: str | None = None,
         **kwargs: Any,
     ) -> None:
         self.image_url = image_url
         self.duration_seconds = duration_seconds
         self.itunes_explicit = itunes_explicit
+        self.itunes_author = itunes_author
         super().__init__(
             title=title,
             enclosure=enclosure,
@@ -833,6 +835,10 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):
             handler.startElement("itunes:duration", {})
             handler.characters(_format_itunes_duration(self.duration_seconds))
             handler.endElement("itunes:duration")
+        if self.itunes_author:
+            handler.startElement("itunes:author", {})
+            handler.characters(self.itunes_author)
+            handler.endElement("itunes:author")
         if self.itunes_explicit:
             handler.startElement("itunes:explicit", {})
             handler.characters(self.itunes_explicit)
@@ -861,7 +867,11 @@ class ItunesRSSItem(PyRSS2Gen.RSSItem):
         PyRSS2Gen._opt_element(handler, "comments", self.comments)
         if self.enclosure is not None:
             self.enclosure.publish(handler)
-        PyRSS2Gen._opt_element(handler, "guid", self.guid)
+        if self.guid is not None:
+            if isinstance(self.guid, PyRSS2Gen.Guid):
+                self.guid.publish(handler)
+            else:
+                PyRSS2Gen._opt_element(handler, "guid", self.guid)
 
         pub_date = self.pubDate
         if isinstance(pub_date, datetime.datetime):
@@ -908,7 +918,10 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
 
     duration_seconds = _feed_item_duration_seconds(post)
     feed = getattr(post, "feed", None)
-    author = (feed.author or "").strip() if feed is not None else ""
+    # Podcast clients want a display name in itunes:author. Do NOT put that name
+    # in RSS <author> — the RSS 2.0 author element must be an email address, and
+    # YouTube Music has been observed to skip new items when it is a bare name.
+    itunes_author = (feed.author or "").strip() if feed is not None else ""
     itunes_explicit = (
         getattr(feed, "itunes_explicit", None) or _DEFAULT_ITUNES_EXPLICIT
         if feed is not None
@@ -918,18 +931,18 @@ def feed_item(post: Post, prepend_feed_title: bool = False) -> PyRSS2Gen.RSSItem
     item = ItunesRSSItem(
         title=title,
         link=audio_url,
-        author=author or None,
         enclosure=PyRSS2Gen.Enclosure(
             url=audio_url,
             type="audio/mpeg",
             length=post.audio_len_bytes(),
         ),
         description=description,
-        guid=post.guid,
+        guid=PyRSS2Gen.Guid(post.guid, isPermaLink=False),
         pubDate=_format_pub_date(post.release_date),
         image_url=post.image_url,
         duration_seconds=duration_seconds,
         itunes_explicit=itunes_explicit,
+        itunes_author=itunes_author or None,
     )
 
     return item
