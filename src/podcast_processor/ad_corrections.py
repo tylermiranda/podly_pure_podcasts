@@ -27,6 +27,7 @@ EXAMPLE_LIMIT = 6
 PROMOTION_MIN_REPEATS = 3
 ANALYZE_MAX_CORRECTIONS = 40
 ANALYZE_SNIPPET_CHARS = 200
+ANALYZE_HEURISTIC_EXAMPLES = 4
 ANALYZE_PROMPT_SYSTEM = (
     "You write short, durable show-specific rules for podcast ad classification. "
     "Given human corrections (missed ads and false-positive content), produce plain "
@@ -34,8 +35,10 @@ ANALYZE_PROMPT_SYSTEM = (
     "episodes of the same show. Separate CONTENT (do not cut) patterns from AD "
     "(cut) patterns when both appear. Do not dump transcript quotes at length; "
     "generalize briefly with short illustrative phrases only when useful. "
-    "Do not repeat guidance already present in the existing show prompt. "
-    "Return only the new rules as a few short sentences or bullets — no preamble."
+    "Prefer rules that are not already covered by the existing show prompt, but "
+    "always return at least one concrete rule derived from the corrections — never "
+    "an empty reply. Return only the rules as a few short sentences or bullets — "
+    "no preamble."
 )
 
 
@@ -352,16 +355,68 @@ def build_analyze_prompt_messages(
     existing = (existing_prompt or "").strip()
     existing_section = existing if existing else "(none)"
     user_content = (
-        "Existing show prompt (do not duplicate):\n"
+        "Existing show prompt (prefer not to duplicate):\n"
         f"{existing_section}\n\n"
         "Human corrections from one episode:\n"
         f"{corrections_block}\n\n"
-        "Write new durable show rules only."
+        "Write durable show rules from these corrections. Always include at least "
+        "one rule; never reply with an empty message."
     )
     return [
         {"role": "system", "content": ANALYZE_PROMPT_SYSTEM},
         {"role": "user", "content": user_content},
     ]
+
+
+def heuristic_prompt_draft_from_corrections(
+    corrections: list[Any],
+    *,
+    existing_prompt: str | None = None,
+    max_examples: int = ANALYZE_HEURISTIC_EXAMPLES,
+) -> str:
+    """Deterministic draft when the LLM returns nothing useful.
+
+    Groups corrections by label and builds short CONTENT/AD rules from example
+    snippets. Skips suggestions already present in ``existing_prompt``.
+    """
+    existing = (existing_prompt or "").strip()
+    by_label: dict[str, list[str]] = {"content": [], "ad": []}
+    seen: set[str] = set()
+    for correction in corrections:
+        label = (getattr(correction, "label", None) or "").strip().lower()
+        if label not in by_label:
+            continue
+        snippet = _truncate_snippet(
+            getattr(correction, "example_text", None), limit=120
+        )
+        if not snippet:
+            continue
+        key = snippet.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        by_label[label].append(snippet)
+
+    lines: list[str] = []
+    content_examples = by_label["content"][:max_examples]
+    if content_examples:
+        quoted = "; ".join(f'"{ex}"' for ex in content_examples)
+        lines.append(
+            f"Treat lines like {quoted} as CONTENT, not ads. "
+            "Do not cut credits, copyright notices, or narrative resumes."
+        )
+    ad_examples = by_label["ad"][:max_examples]
+    if ad_examples:
+        quoted = "; ".join(f'"{ex}"' for ex in ad_examples)
+        lines.append(
+            f"Cut sponsor reads matching {quoted}. Keep the surrounding show content."
+        )
+
+    draft_lines = [line for line in lines if line and line not in existing]
+    if not draft_lines and lines:
+        # Still surface something so the UI can review even if already covered
+        draft_lines = lines
+    return "\n".join(draft_lines).strip()
 
 
 def analyze_corrections_for_prompt(
@@ -372,12 +427,13 @@ def analyze_corrections_for_prompt(
 ) -> dict[str, Any]:
     """LLM-synthesize feed-prompt draft from this episode's active corrections.
 
-    Does not write the feed. Raises ValueError when there are no corrections or
-    the model returns empty text.
+    Does not write the feed. Raises ValueError when there are no corrections.
+    Falls back to a heuristic draft if the model returns empty text.
     """
     import litellm
 
     from podcast_processor.llm_model_call_utils import extract_litellm_content
+    from shared.llm_utils import model_uses_max_completion_tokens
 
     corrections = load_active_corrections_for_post(post_id)
     if not corrections:
@@ -394,14 +450,18 @@ def analyze_corrections_for_prompt(
         existing_prompt=existing_prompt,
     )
 
+    model_name = getattr(config, "llm_model", None) or "gpt-4o"
     completion_args: dict[str, Any] = {
-        "model": getattr(config, "llm_model", None) or "gpt-4o",
+        "model": model_name,
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": 800,
         "timeout": int(getattr(config, "openai_timeout", 300) or 300),
         "api_key": getattr(config, "llm_api_key", None),
     }
+    if model_uses_max_completion_tokens(model_name):
+        completion_args["max_completion_tokens"] = 800
+    else:
+        completion_args["max_tokens"] = 800
     base_url = getattr(config, "openai_base_url", None)
     if isinstance(base_url, str) and base_url.strip():
         completion_args["base_url"] = base_url.strip()
@@ -409,7 +469,18 @@ def analyze_corrections_for_prompt(
     response = litellm.completion(**completion_args)
     draft = extract_litellm_content(response).strip()
     if not draft:
-        raise ValueError("Model returned an empty prompt draft")
+        draft = heuristic_prompt_draft_from_corrections(
+            corrections,
+            existing_prompt=existing_prompt,
+        )
+        if draft:
+            logger.warning(
+                "analyze-prompt: model returned empty content for post %s; "
+                "using heuristic draft",
+                post_id,
+            )
+        else:
+            raise ValueError("Model returned an empty prompt draft")
 
     existing = (existing_prompt or "").strip() or None
     return {
