@@ -63,7 +63,7 @@ RUN if [ -f /etc/debian_version ]; then \
     # Install other dependencies
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ffmpeg \
-    chromaprint-tools \
+    libchromaprint-tools \
     sqlite3 \
     libsqlite3-dev \
     build-essential \
