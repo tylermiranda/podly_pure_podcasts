@@ -908,15 +908,21 @@ def _feeds_visible_to_current_user() -> tuple[
     return feeds, current_user, None
 
 
-def _build_feeds_opml(feeds: list[Feed]) -> str:
-    """Build an OPML 2.0 document from upstream Feed rss_url values."""
+def _build_feeds_opml(entries: list[tuple[Feed, str]]) -> str:
+    """Build an OPML 2.0 document of Podly feed URLs.
+
+    Each entry is ``(feed, xml_url)`` where ``xml_url`` is this instance's
+    Podly RSS URL (tokenized when auth is required).
+    """
     root = ET.Element("opml", version="2.0")
     head = ET.SubElement(root, "head")
     title_el = ET.SubElement(head, "title")
     title_el.text = "Podly Feeds"
     body = ET.SubElement(root, "body")
 
-    for feed in sorted(feeds, key=lambda item: (item.title or "").casefold()):
+    for feed, xml_url in sorted(
+        entries, key=lambda item: (item[0].title or "").casefold()
+    ):
         ET.SubElement(
             body,
             "outline",
@@ -924,12 +930,33 @@ def _build_feeds_opml(feeds: list[Feed]) -> str:
                 "text": feed.title or "",
                 "title": feed.title or "",
                 "type": "rss",
-                "xmlUrl": feed.rss_url or "",
+                "xmlUrl": xml_url,
             },
         )
 
     xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
     return xml_bytes.decode("utf-8")
+
+
+def _podly_feed_xml_url(feed: Feed, *, user: User | None, require_auth: bool) -> str:
+    """Return the Podly RSS URL for a feed (with access token when auth is on)."""
+    base_url = _get_base_url()
+    path = f"/feed/{feed.id}"
+    if not require_auth or user is None:
+        return f"{base_url}{path}"
+
+    result = writer_client.action(
+        "create_feed_access_token",
+        {"user_id": user.id, "feed_id": feed.id},
+        wait=True,
+    )
+    if not result or not result.success or not isinstance(result.data, dict):
+        raise RuntimeError(f"Failed to create feed token for feed {feed.id}")
+
+    token_id = str(result.data["token_id"])
+    secret = str(result.data["secret"])
+    query = urlencode({"feed_token": token_id, "feed_secret": secret})
+    return f"{base_url}{path}?{query}"
 
 
 @feed_bp.route("/feeds", methods=["GET"])
@@ -944,12 +971,29 @@ def api_feeds() -> ResponseReturnValue:
 
 @feed_bp.route("/api/feeds/export.opml", methods=["GET"])
 def export_feeds_opml() -> ResponseReturnValue:
-    feeds, _current_user, error = _feeds_visible_to_current_user()
+    feeds, current_user, error = _feeds_visible_to_current_user()
     if error:
         return error
 
+    settings = current_app.config.get("AUTH_SETTINGS")
+    require_auth = bool(settings and settings.require_auth)
+    if require_auth and current_user is None:
+        return jsonify({"error": "Authentication required."}), 401
+
+    try:
+        entries = [
+            (
+                feed,
+                _podly_feed_xml_url(feed, user=current_user, require_auth=require_auth),
+            )
+            for feed in feeds
+        ]
+    except RuntimeError as exc:
+        logger.error("OPML export token failure: %s", exc)
+        return jsonify({"error": "Failed to create feed access tokens."}), 500
+
     response = Response(
-        _build_feeds_opml(feeds),
+        _build_feeds_opml(entries),
         mimetype="application/xml; charset=utf-8",
     )
     response.headers["Content-Disposition"] = 'attachment; filename="podly-feeds.opml"'

@@ -374,6 +374,8 @@ def test_export_feeds_opml_includes_all_feeds(app):
         alpha = Feed(title="Alpha Show", rss_url="https://example.com/alpha.xml")
         db.session.add_all([zeta, alpha])
         db.session.commit()
+        alpha_id = alpha.id
+        zeta_id = zeta.id
 
         client = _make_client(app)
         response = client.get("/api/feeds/export.opml")
@@ -392,10 +394,13 @@ def test_export_feeds_opml_includes_all_feeds(app):
         outlines = root.findall("./body/outline")
         assert len(outlines) == 2
         assert [o.attrib["title"] for o in outlines] == ["Alpha Show", "Zeta Show"]
+        xml_urls = {o.attrib["xmlUrl"] for o in outlines}
+        assert any(f"/feed/{alpha_id}" in url for url in xml_urls)
+        assert any(f"/feed/{zeta_id}" in url for url in xml_urls)
         for outline in outlines:
             assert outline.attrib["type"] == "rss"
             assert outline.attrib["text"] == outline.attrib["title"]
-            assert outline.attrib["xmlUrl"].startswith("https://example.com/")
+            assert "example.com" not in outline.attrib["xmlUrl"]
 
 
 def test_build_feeds_opml_escapes_special_characters(app):
@@ -404,9 +409,16 @@ def test_build_feeds_opml_escapes_special_characters(app):
     with app.app_context():
         feed = Feed(
             title="Cats & Dogs <Best>",
-            rss_url='https://example.com/feed?a=1&b="2"',
+            rss_url="https://example.com/upstream.xml",
         )
-        opml = _build_feeds_opml([feed])
+        opml = _build_feeds_opml(
+            [
+                (
+                    feed,
+                    'http://localhost/feed/1?feed_token=abc&feed_secret="x"',
+                )
+            ]
+        )
 
         assert "&amp;" in opml
         assert "&lt;" in opml
@@ -414,3 +426,4 @@ def test_build_feeds_opml_escapes_special_characters(app):
         assert "&quot;" in opml or "&#34;" in opml
         # Raw unescaped attribute-breaking characters must not appear
         assert 'title="Cats & Dogs <Best>"' not in opml
+        assert "example.com/upstream" not in opml

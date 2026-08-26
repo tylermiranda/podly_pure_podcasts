@@ -239,7 +239,7 @@ export default function HomePage() {
                 void handleExportOpml();
               }}
               className="h-10 w-10 shrink-0 flex items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors"
-              title="Export all podcast feeds as OPML"
+              title="Export Podly feed URLs as OPML"
             >
               <svg
                 className="w-4 h-4"

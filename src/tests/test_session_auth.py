@@ -360,8 +360,8 @@ def test_export_opml_respects_non_admin_feed_visibility(auth_app: Flask) -> None
         db.session.add(UserFeed(user_id=regular.id, feed_id=joined.id))
         db.session.commit()
 
-        joined_url = joined.rss_url
-        other_url = other.rss_url
+        joined_id = joined.id
+        other_id = other.id
 
     client.post("/api/auth/login", json={"username": "member", "password": "password"})
     response = client.get("/api/feeds/export.opml")
@@ -369,5 +369,7 @@ def test_export_opml_respects_non_admin_feed_visibility(auth_app: Flask) -> None
     assert response.status_code == 200
     root = ET.fromstring(response.get_data(as_text=True))
     xml_urls = {outline.attrib["xmlUrl"] for outline in root.findall("./body/outline")}
-    assert joined_url in xml_urls
-    assert other_url not in xml_urls
+    assert any(f"/feed/{joined_id}" in url for url in xml_urls)
+    assert all(f"/feed/{other_id}" not in url for url in xml_urls)
+    assert all("example.com" not in url for url in xml_urls)
+    assert all("feed_token=" in url and "feed_secret=" in url for url in xml_urls)
