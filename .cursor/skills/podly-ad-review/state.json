@@ -146,6 +146,26 @@
       "pass": true,
       "ad_pct": 21.5,
       "checked_at": "2026-08-25T14:14:28.565213Z"
+    },
+    "ef4a0b73-c202-5793-b674-306d91cb3d4c": {
+      "pass": true,
+      "ad_pct": 17.3,
+      "checked_at": "2026-08-26T18:14:59.580702Z"
+    },
+    "d3ee4645-8aa2-57d9-97b2-a26d988cd220": {
+      "pass": true,
+      "ad_pct": 20.9,
+      "checked_at": "2026-08-26T18:14:59.643572Z"
+    },
+    "267391af-c63f-4343-a9be-55a5446379a0": {
+      "pass": true,
+      "ad_pct": 7.8,
+      "checked_at": "2026-08-26T18:14:59.801492Z"
+    },
+    "02c966a9-b82a-4a8b-b141-298382d79796": {
+      "pass": true,
+      "ad_pct": 10.1,
+      "checked_at": "2026-08-26T18:14:59.919901Z"
     }
   },
   "failures": {
@@ -1017,9 +1037,49 @@
       "ad_pct": 21.5,
       "failures": [],
       "warnings": []
+    },
+    {
+      "ts": "2026-08-26T18:14:59.580680Z",
+      "guid": "ef4a0b73-c202-5793-b674-306d91cb3d4c",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": true,
+      "ad_pct": 17.3,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-26T18:14:59.643541Z",
+      "guid": "d3ee4645-8aa2-57d9-97b2-a26d988cd220",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": true,
+      "ad_pct": 20.9,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-26T18:14:59.801468Z",
+      "guid": "267391af-c63f-4343-a9be-55a5446379a0",
+      "feed_id": 2,
+      "feed_title": "Planet Money",
+      "pass": true,
+      "ad_pct": 7.8,
+      "failures": [],
+      "warnings": []
+    },
+    {
+      "ts": "2026-08-26T18:14:59.919879Z",
+      "guid": "02c966a9-b82a-4a8b-b141-298382d79796",
+      "feed_id": 11,
+      "feed_title": "Everything 80s",
+      "pass": true,
+      "ad_pct": 10.1,
+      "failures": [],
+      "warnings": []
     }
   ],
   "local_num_segments_per_prompt": 24,
-  "last_run_at": "2026-08-25T14:14:28.569268Z",
+  "last_run_at": "2026-08-26T18:14:59.922193Z",
   "notes": "DeepSeek Flash reprocess 2026-08-12 (refiners off, segments=60, content_guard hot-patched). PM 14.7% band-fail + unlabeled interview FPs ~1180-1299s. H90 0% \u2014 ModelCall 953 failed_permanent empty response. E80 12.1% mixed bleeds still in labels (Grow disclaimer + cold-open; Jerry.ai + cold-open)."
 }
