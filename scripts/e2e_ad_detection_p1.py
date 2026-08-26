@@ -90,19 +90,22 @@ def main() -> None:
         )
         db.session.add(post)
         db.session.commit()
-        with patch(
-            "podcast_processor.ad_audio_fingerprint.fingerprint_window",
-            return_value="9,8,7",
-        ), patch(
-            "app.config_store.to_pydantic_config",
-            return_value=type(
-                "Cfg",
-                (),
-                {
-                    "jingle_min_seconds": 1.0,
-                    "jingle_max_seconds": 15.0,
-                },
-            )(),
+        with (
+            patch(
+                "podcast_processor.ad_audio_fingerprint.fingerprint_window",
+                return_value="9,8,7",
+            ),
+            patch(
+                "app.config_store.to_pydantic_config",
+                return_value=type(
+                    "Cfg",
+                    (),
+                    {
+                        "jingle_min_seconds": 1.0,
+                        "jingle_max_seconds": 15.0,
+                    },
+                )(),
+            ),
         ):
             upsert_jingle_template_action(
                 {
