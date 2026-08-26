@@ -377,6 +377,40 @@ class AdCorrection(db.Model):  # type: ignore[name-defined, misc]
         )
 
 
+class AdCreative(db.Model):  # type: ignore[name-defined, misc]
+    """Cross-episode normalized sponsor creative for a feed."""
+
+    __tablename__ = "ad_creative"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    feed_id = db.Column(
+        db.Integer, db.ForeignKey("feed.id"), nullable=False, index=True
+    )
+    prompt_tag_id = db.Column(
+        db.Integer, db.ForeignKey("tag.id"), nullable=True, index=True
+    )
+    normalized_text = db.Column(db.Text, nullable=False)
+    fingerprint = db.Column(db.String(64), nullable=False)
+    sample_text = db.Column(db.Text, nullable=True)
+    source_post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True)
+    hit_count = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=_utc_now_naive, onupdate=_utc_now_naive
+    )
+
+    feed = db.relationship("Feed", backref=db.backref("ad_creatives", lazy="dynamic"))
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "feed_id", "fingerprint", name="uq_ad_creative_feed_fingerprint"
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdCreative {self.id} feed={self.feed_id} hits={self.hit_count}>"
+
+
 class JobsManagerRun(db.Model):  # type: ignore[name-defined, misc]
     __tablename__ = "jobs_manager_run"
 
@@ -512,6 +546,12 @@ class LLMSettings(db.Model):  # type: ignore[name-defined, misc]
         nullable=False,
         default=DEFAULTS.ENABLE_LLM_CHAPTER_FALLBACK_TAGGING,
     )
+    enable_ad_verify = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=DEFAULTS.ENABLE_AD_VERIFY,
+    )
+    llm_verify_model = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)
     updated_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)

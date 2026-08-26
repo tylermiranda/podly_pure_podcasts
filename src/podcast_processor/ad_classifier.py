@@ -197,6 +197,7 @@ class AdClassifier:
 
             self._apply_sponsor_cue_labels(transcript_segments, post)
             self._label_repeated_creatives(transcript_segments, post)
+            self._label_known_creatives(transcript_segments, post)
 
             # Expand neighbors using bulk operations
             # NOTE: Use self.db_session.query() instead of self.identification_query
@@ -1234,6 +1235,74 @@ class AdClassifier:
         created = self._create_identifications_bulk(to_insert)
         self.logger.info(
             "Repeated-creative fallback labeled %s segments for post %s",
+            created,
+            post.id,
+        )
+        return created
+
+    def _label_known_creatives(
+        self, transcript_segments: list[TranscriptSegment], post: Post
+    ) -> int:
+        """Label segments matching the durable cross-episode creative index."""
+        if not transcript_segments or post.feed_id is None:
+            return 0
+
+        from podcast_processor.ad_creatives import (
+            load_feed_creatives,
+            match_segment_to_creatives,
+        )
+
+        feed = getattr(post, "feed", None)
+        creatives = load_feed_creatives(
+            feed_id=int(post.feed_id),
+            prompt_tag_id=getattr(feed, "prompt_tag_id", None),
+        )
+        if not creatives:
+            return 0
+
+        model_call = self._latest_llm_model_call(post.id)
+        if model_call is None:
+            return 0
+
+        existing_ids = {
+            row[0]
+            for row in self.db_session.query(Identification.transcript_segment_id)
+            .join(TranscriptSegment)
+            .filter(
+                TranscriptSegment.post_id == post.id,
+                Identification.label == "ad",
+            )
+            .all()
+        }
+        jaccard_threshold = float(
+            getattr(self.config, "ad_creative_jaccard", 0.85) or 0.85
+        )
+        to_insert: list[dict[str, Any]] = []
+        for segment in transcript_segments:
+            if segment.id in existing_ids:
+                continue
+            match = match_segment_to_creatives(
+                segment.text or "",
+                creatives,
+                jaccard_threshold=jaccard_threshold,
+            )
+            if match is None:
+                continue
+            to_insert.append(
+                {
+                    "transcript_segment_id": segment.id,
+                    "model_call_id": model_call.id,
+                    "label": "ad",
+                    "confidence": 0.88,
+                    "start_time": float(segment.start_time or 0.0),
+                    "end_time": float(segment.end_time or 0.0),
+                }
+            )
+        if not to_insert:
+            return 0
+        created = self._create_identifications_bulk(to_insert)
+        self.logger.info(
+            "Known-creative index labeled %s segments for post %s",
             created,
             post.id,
         )

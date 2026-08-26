@@ -1,6 +1,13 @@
 from types import SimpleNamespace
 
-from podcast_processor.ad_eval import score_windows, window_iou
+import json
+from pathlib import Path
+
+from podcast_processor.ad_eval import (
+    score_windows,
+    score_windows_detailed,
+    window_iou,
+)
 from podcast_processor.ad_spans import (
     apply_content_guard_to_span,
     expand_cut_windows,
@@ -64,5 +71,35 @@ def test_salvador_dali_expanded_windows_match_gold() -> None:
     assert result["false_positives"] == 0
     assert result["recall"] == 1.0
     assert result["precision"] == 1.0
+    assert result["f1"] == 1.0
     for stamp in NARRATIVE_START_TIMES:
         assert not windows_cover(predicted, stamp)
+
+
+def test_score_windows_detailed_metrics() -> None:
+    # Perfect overlap on one window; one false cut; one residual gold.
+    detailed = score_windows_detailed(
+        predicted=[(0.0, 10.0), (50.0, 60.0)],
+        gold=[(0.0, 10.0), (100.0, 110.0)],
+        iou_threshold=0.5,
+    )
+    assert detailed["true_positives"] == 1
+    assert detailed["false_positives"] == 1
+    assert detailed["false_negatives"] == 1
+    assert detailed["mae_start"] == 0.0
+    assert detailed["mae_end"] == 0.0
+    assert detailed["false_cut_seconds"] == 10.0
+    assert detailed["residual_ad_seconds"] == 10.0
+    assert 0.0 < float(detailed["f1"]) < 1.0
+
+
+def test_salvador_dali_gold_fixture_json_matches_module() -> None:
+    path = (
+        Path(__file__).resolve().parent
+        / "fixtures"
+        / "ad_gold"
+        / "salvador_dali.json"
+    )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    windows = [(float(s), float(e)) for s, e in data["windows"]]
+    assert windows == SALVADOR_DALI_GOLD_WINDOWS

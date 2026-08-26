@@ -107,6 +107,8 @@ def ensure_defaults() -> None:
             "enable_boundary_refinement": DEFAULTS.ENABLE_BOUNDARY_REFINEMENT,
             "enable_word_level_boundary_refinder": DEFAULTS.ENABLE_WORD_LEVEL_BOUNDARY_REFINDER,
             "enable_llm_chapter_fallback_tagging": DEFAULTS.ENABLE_LLM_CHAPTER_FALLBACK_TAGGING,
+            "enable_ad_verify": DEFAULTS.ENABLE_AD_VERIFY,
+            "llm_verify_model": DEFAULTS.LLM_VERIFY_MODEL,
         },
     )
 
@@ -211,6 +213,10 @@ def read_combined() -> dict[str, Any]:
             "enable_boundary_refinement": llm.enable_boundary_refinement,
             "enable_word_level_boundary_refinder": llm.enable_word_level_boundary_refinder,
             "enable_llm_chapter_fallback_tagging": llm.enable_llm_chapter_fallback_tagging,
+            "enable_ad_verify": getattr(
+                llm, "enable_ad_verify", DEFAULTS.ENABLE_AD_VERIFY
+            ),
+            "llm_verify_model": getattr(llm, "llm_verify_model", None),
         },
         "whisper": whisper_payload,
         "processing": {
@@ -253,6 +259,8 @@ def _update_section_llm(data: dict[str, Any]) -> None:
         "enable_boundary_refinement",
         "enable_word_level_boundary_refinder",
         "enable_llm_chapter_fallback_tagging",
+        "enable_ad_verify",
+        "llm_verify_model",
     ]:
         if key in data:
             new_val = data[key]
@@ -534,6 +542,23 @@ def to_pydantic_config() -> PydanticConfig:
                 "enable_llm_chapter_fallback_tagging",
                 DEFAULTS.ENABLE_LLM_CHAPTER_FALLBACK_TAGGING,
             )
+        ),
+        enable_ad_verify=bool(
+            data["llm"].get("enable_ad_verify", DEFAULTS.ENABLE_AD_VERIFY)
+        ),
+        llm_verify_model=data["llm"].get("llm_verify_model")
+        or DEFAULTS.LLM_VERIFY_MODEL,
+        ad_creative_min_chars=int(
+            data.get("processing", {}).get(
+                "ad_creative_min_chars", DEFAULTS.AD_CREATIVE_MIN_CHARS
+            )
+            or DEFAULTS.AD_CREATIVE_MIN_CHARS
+        ),
+        ad_creative_jaccard=float(
+            data.get("processing", {}).get(
+                "ad_creative_jaccard", DEFAULTS.AD_CREATIVE_JACCARD
+            )
+            or DEFAULTS.AD_CREATIVE_JACCARD
         ),
         output=data["output"],
         processing=data["processing"],

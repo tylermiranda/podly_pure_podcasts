@@ -1,0 +1,12 @@
+{
+  "guid": "e60d215e-7c7c-11f1-8d29-b70ac5a24b6a",
+  "title": "Salvador Dalí (Short History Of...) — synthetic gold",
+  "notes": "Exported from tests.salvador_dali_fixture.SALVADOR_DALI_GOLD_WINDOWS",
+  "windows": [
+    [1.0, 55.9],
+    [678.2, 733.1],
+    [1039.8, 1094.7],
+    [1949.5, 2004.4],
+    [2996.3, 3066.4]
+  ]
+}

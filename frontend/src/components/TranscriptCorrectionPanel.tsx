@@ -331,6 +331,11 @@ export default function TranscriptCorrectionPanel({
       const snippet = suggestedPrompt?.snippet;
       if (!snippet) return;
       const existing = existingPrompt?.trim() || '';
+      if (existing && existing.includes(snippet.trim())) {
+        return feedsApi.updateFeedSettings(feedId, {
+          custom_llm_ad_prompt: existing,
+        });
+      }
       const next = existing
         ? `${existing}\n\n${snippet}`
         : snippet;
@@ -350,6 +355,12 @@ export default function TranscriptCorrectionPanel({
     mutationFn: () => feedsApi.analyzeAdCorrectionsPrompt(episodeGuid),
     onSuccess: (data) => {
       setError(null);
+      const draft = (data.draft || '').trim();
+      if (!draft) {
+        setLearnedDraft(null);
+        setError('Model returned an empty prompt draft');
+        return;
+      }
       setLearnedDraft(data.draft);
       setLearnedExistingPrompt(data.existing_prompt);
       setStatus(null);
@@ -367,11 +378,17 @@ export default function TranscriptCorrectionPanel({
       if (!snippet) return;
       const existing =
         (learnedExistingPrompt ?? existingPrompt)?.trim() || '';
+      if (existing && existing.includes(snippet)) {
+        toast.success('Draft already present in show prompt');
+        return feedsApi.updateFeedSettings(feedId, {
+          custom_llm_ad_prompt: existing,
+        });
+      }
       const next = existing ? `${existing}\n\n${snippet}` : snippet;
       return feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
     },
     onSuccess: async () => {
-      toast.success('Feed prompt updated');
+      toast.success('Feed prompt updated — Recut if cuts should change');
       setLearnedDraft(null);
       setLearnedExistingPrompt(null);
       await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });

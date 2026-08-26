@@ -1,0 +1,10 @@
+{
+  "guid": "example-dai-heavy",
+  "title": "DAI / programmatic-heavy template (placeholder)",
+  "notes": "Replace windows with hand-labeled gold from a live corrected episode.",
+  "windows": [
+    [0.0, 30.0],
+    [900.0, 960.0],
+    [2100.0, 2160.0]
+  ]
+}

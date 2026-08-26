@@ -112,6 +112,30 @@ class Config(BaseModel):
             "generate fallback chapter tags from description/transcript."
         ),
     )
+    enable_ad_verify: bool = Field(
+        default=DEFAULTS.ENABLE_AD_VERIFY,
+        description=(
+            "Run a second-pass LLM verify over draft ad windows and store "
+            "results in refined_ad_boundaries (shared Stats + ffmpeg path)."
+        ),
+    )
+    llm_verify_model: str | None = Field(
+        default=DEFAULTS.LLM_VERIFY_MODEL,
+        description=(
+            "Optional dedicated model for ad verify. Falls back to llm_model when unset."
+        ),
+    )
+    ad_creative_min_chars: int = Field(
+        default=DEFAULTS.AD_CREATIVE_MIN_CHARS,
+        ge=8,
+        description="Minimum normalized creative length to index / match.",
+    )
+    ad_creative_jaccard: float = Field(
+        default=DEFAULTS.AD_CREATIVE_JACCARD,
+        ge=0.0,
+        le=1.0,
+        description="Token Jaccard threshold for fuzzy creative matching.",
+    )
     developer_mode: bool = Field(
         default=False,
         description="Enable developer mode features like test feeds",

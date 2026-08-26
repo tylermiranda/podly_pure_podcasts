@@ -1,0 +1,9 @@
+{
+  "guid": "example-npr-style-host-read",
+  "title": "NPR-style host-read midroll template (placeholder)",
+  "notes": "Replace windows with hand-labeled gold from a live corrected episode.",
+  "windows": [
+    [45.0, 120.0],
+    [1800.0, 1920.0]
+  ]
+}

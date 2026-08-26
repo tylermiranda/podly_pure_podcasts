@@ -459,6 +459,21 @@ class PodcastProcessor:
             (start_ms / 1000.0, end_ms / 1000.0)
             for start_ms, end_ms in removed_segments_ms
         ]
+        try:
+            from podcast_processor.ad_creatives import upsert_from_post_cut_windows
+
+            upsert_from_post_cut_windows(
+                post=post,
+                windows=removed_segments_sec,
+                segments=transcript_segments,
+                min_chars=int(
+                    getattr(self.config, "ad_creative_min_chars", 24) or 24
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            self.logger.exception(
+                "Failed to upsert ad creatives for post %s", post.id
+            )
 
         chapters_for_output = []
         chapter_source = "none"
@@ -928,10 +943,23 @@ class PodcastProcessor:
             prompt_tag_id=getattr(feed, "prompt_tag_id", None),
             query_text=transcript_text,
         )
+        creative_hints = ""
+        if post.feed_id is not None:
+            from podcast_processor.ad_creatives import (
+                format_creative_prompt_hints,
+                load_feed_creatives,
+            )
+
+            creatives = load_feed_creatives(
+                feed_id=int(post.feed_id),
+                prompt_tag_id=getattr(feed, "prompt_tag_id", None),
+            )
+            creative_hints = format_creative_prompt_hints(creatives)
         system_prompt = self.build_ad_classification_system_prompt(
             system_prompt,
             feed,
             examples_prompt=format_correction_examples_prompt(examples),
+            creative_hints=creative_hints,
         )
 
         self.ad_classifier.classify(
@@ -940,6 +968,56 @@ class PodcastProcessor:
             user_prompt_template=user_prompt_template,
             post=post,
         )
+        self._maybe_verify_ad_windows(post, transcript_segments)
+
+    def _maybe_verify_ad_windows(
+        self,
+        post: Post,
+        transcript_segments: list[TranscriptSegment],
+    ) -> None:
+        """Optional second-pass verify; writes refined_ad_boundaries for shared cuts."""
+        if not bool(getattr(self.config, "enable_ad_verify", False)):
+            return
+
+        from app.models import Identification, ModelCall
+        from app.routes.post_stats_utils import (
+            cut_eligible_identifications,
+            labeled_cut_windows,
+            merge_time_windows,
+        )
+        from podcast_processor.ad_verifier import AdVerifier
+
+        session = getattr(self, "db_session", None) or db.session
+        refresh_read_snapshot(session, self.logger, "before_ad_verify")
+        identifications = (
+            session.query(Identification)
+            .join(
+                TranscriptSegment,
+                Identification.transcript_segment_id == TranscriptSegment.id,
+            )
+            .filter(TranscriptSegment.post_id == post.id)
+            .all()
+        )
+        model_calls = (
+            session.query(ModelCall).filter(ModelCall.post_id == post.id).all()
+        )
+        eligible = cut_eligible_identifications(
+            identifications,
+            model_calls,
+            min_confidence=float(self.config.output.min_confidence),
+        )
+        draft = merge_time_windows(labeled_cut_windows(eligible), gap_seconds=1.0)
+        try:
+            AdVerifier(self.config, self.logger).verify_and_store(
+                post=post,
+                draft_windows=draft,
+                segments=transcript_segments,
+            )
+        except Exception:  # noqa: BLE001
+            self.logger.exception(
+                "Ad verify failed for post %s; continuing with draft labels",
+                post.id,
+            )
 
     def _simulate_developer_processing(
         self,
@@ -1114,8 +1192,9 @@ class PodcastProcessor:
         feed: Any,
         *,
         examples_prompt: str | None = None,
+        creative_hints: str | None = None,
     ) -> str:
-        """Compose base → tag prompt → per-feed custom prompt → retrieved examples."""
+        """Compose base → tag prompt → per-feed custom prompt → creatives → examples."""
         parts = [base_prompt]
         prompt_tag = getattr(feed, "prompt_tag", None)
         tag_prompt = (
@@ -1126,6 +1205,8 @@ class PodcastProcessor:
         custom_prompt = getattr(feed, "custom_llm_ad_prompt", None)
         if isinstance(custom_prompt, str) and custom_prompt.strip():
             parts.append(custom_prompt.strip())
+        if isinstance(creative_hints, str) and creative_hints.strip():
+            parts.append(creative_hints.strip())
         if isinstance(examples_prompt, str) and examples_prompt.strip():
             parts.append(examples_prompt.strip())
         return "\n\n".join(parts)

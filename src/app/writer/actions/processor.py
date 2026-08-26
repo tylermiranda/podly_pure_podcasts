@@ -442,6 +442,29 @@ def insert_ad_correction_action(params: dict[str, Any]) -> dict[str, Any]:
     )
     db.session.add(correction)
     db.session.flush()
+
+    if label == "ad":
+        try:
+            from podcast_processor.ad_creatives import upsert_creatives_for_feed
+
+            sample = (correction.example_text or "").strip()
+            if sample:
+                feed = getattr(post, "feed", None)
+                upsert_creatives_for_feed(
+                    feed_id=int(post.feed_id),
+                    texts=[sample],
+                    source_post_id=post.id,
+                    prompt_tag_id=(
+                        getattr(feed, "prompt_tag_id", None)
+                        if feed is not None
+                        else None
+                    ),
+                    commit=False,
+                )
+        except Exception:  # noqa: BLE001
+            # Creative index must not fail correction saves.
+            pass
+
     return {
         "id": int(correction.id),
         "post_id": post.id,
