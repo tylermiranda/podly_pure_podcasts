@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
@@ -498,7 +499,9 @@ def upsert_jingle_template_action(params: dict[str, Any]) -> dict[str, Any]:
     """Extract audio slice fingerprint and upsert as kind=jingle for a feed."""
     from app.config_store import to_pydantic_config
     from podcast_processor.ad_audio_fingerprint import (
+        ffmpeg_available,
         fingerprint_window,
+        fpcalc_available,
         upsert_fingerprint,
     )
 
@@ -531,13 +534,26 @@ def upsert_jingle_template_action(params: dict[str, Any]) -> dict[str, Any]:
     if int(post.feed_id) != int(feed_id):
         raise ValueError("post does not belong to feed")
 
-    audio_path = post.unprocessed_audio_path or post.processed_audio_path
-    if not audio_path:
-        raise ValueError("post has no audio file to fingerprint")
+    audio_path = post.unprocessed_audio_path
+    if not audio_path or not os.path.isfile(audio_path):
+        raise ValueError(
+            "Original unprocessed audio is required for jingle templates. "
+            "Reprocess the episode if the source file was removed after processing."
+        )
+
+    if not fpcalc_available():
+        raise ValueError(
+            "fpcalc is not installed (Docker: libchromaprint-tools; Mac: brew install chromaprint)"
+        )
+    if not ffmpeg_available():
+        raise ValueError("ffmpeg is not installed")
 
     fingerprint = fingerprint_window(str(audio_path), start, end)
     if not fingerprint:
-        raise ValueError("failed to fingerprint audio (is fpcalc installed?)")
+        raise ValueError(
+            "Could not fingerprint the selected audio range. "
+            "Use a 1–15 second selection from the episode timeline."
+        )
 
     feed = getattr(post, "feed", None)
     upsert_fingerprint(

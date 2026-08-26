@@ -17,13 +17,38 @@ def test_fingerprint_distance_disjoint() -> None:
     assert fingerprint_distance("0,0", "4294967295,4294967295") == 1.0
 
 
-def test_fingerprint_window_parses_fpcalc_output() -> None:
-    proc = MagicMock()
-    proc.returncode = 0
-    proc.stdout = "DURATION=5\nFINGERPRINT=9,8,7\n"
-    fp = fingerprint_window("/tmp/x.mp3", 0.0, 5.0, subprocess_run=proc)
+def test_fingerprint_window_parses_fpcalc_output(tmp_path) -> None:
+    audio = tmp_path / "x.mp3"
+    audio.write_bytes(b"fake-audio")
+
+    ffmpeg_proc = MagicMock()
+    ffmpeg_proc.stdout = MagicMock()
+    ffmpeg_proc.stderr = MagicMock()
+    ffmpeg_proc.stderr.read.return_value = b""
+    ffmpeg_proc.wait.return_value = 0
+
+    fpcalc_proc = MagicMock()
+    fpcalc_proc.returncode = 0
+    fpcalc_proc.stdout = "DURATION=5\nFINGERPRINT=9,8,7\n"
+    fpcalc_proc.stderr = ""
+
+    run_mock = MagicMock(return_value=fpcalc_proc)
+    popen_mock = MagicMock(return_value=ffmpeg_proc)
+
+    fp = fingerprint_window(
+        str(audio),
+        1.0,
+        5.0,
+        subprocess_run=run_mock,
+        subprocess_popen=popen_mock,
+    )
     assert fp == "9,8,7"
-    assert "fpcalc" in proc.call_args.args[0][0]
+    ffmpeg_cmd = popen_mock.call_args.args[0]
+    assert ffmpeg_cmd[0] == "ffmpeg"
+    assert "-ss" in ffmpeg_cmd
+    assert "1.0" in ffmpeg_cmd
+    fpcalc_cmd = run_mock.call_args.args[0]
+    assert fpcalc_cmd[:3] == ["fpcalc", "-raw", "-"]
 
 
 def test_match_fingerprints_respects_threshold() -> None:

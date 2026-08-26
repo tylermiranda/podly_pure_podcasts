@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 from datetime import UTC, datetime
@@ -15,44 +16,89 @@ def fpcalc_available() -> bool:
     return shutil.which("fpcalc") is not None
 
 
+def ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None
+
+
 def fingerprint_window(
     audio_path: str,
     start: float,
     end: float,
     *,
     subprocess_run: Any = subprocess.run,
+    subprocess_popen: Any = subprocess.Popen,
 ) -> str | None:
     """Return raw Chromaprint fingerprint string for [start, end) seconds."""
     duration = max(0.0, end - start)
     if duration <= 0:
         return None
+    if not os.path.isfile(audio_path):
+        logger.warning("audio file not found for fingerprint: %s", audio_path)
+        return None
     if not fpcalc_available():
         logger.warning("fpcalc not found on PATH; audio fingerprinting disabled")
         return None
-    cmd = [
-        "fpcalc",
-        "-raw",
-        "-length",
-        str(int(duration) + 1),
-        "-offset",
+    if not ffmpeg_available():
+        logger.warning("ffmpeg not found on PATH; audio fingerprinting disabled")
+        return None
+
+    ffmpeg_cmd = [
+        "ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
         str(max(0.0, start)),
+        "-t",
+        str(duration),
+        "-i",
         audio_path,
+        "-f",
+        "wav",
+        "pipe:1",
     ]
     try:
-        proc = subprocess_run(
-            cmd,
+        ffmpeg_proc = subprocess_popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if ffmpeg_proc.stdout is None:
+            logger.warning("ffmpeg did not provide stdout for %s", audio_path)
+            return None
+        fpcalc_proc = subprocess_run(
+            ["fpcalc", "-raw", "-"],
+            stdin=ffmpeg_proc.stdout,
             capture_output=True,
             text=True,
             check=False,
             timeout=120,
         )
+        ffmpeg_proc.stdout.close()
+        ffmpeg_stderr = ""
+        if ffmpeg_proc.stderr is not None:
+            ffmpeg_stderr = ffmpeg_proc.stderr.read().decode(errors="replace")
+        ffmpeg_rc = ffmpeg_proc.wait(timeout=120)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("fpcalc failed for %s: %s", audio_path, exc)
+        logger.warning("fingerprint pipeline failed for %s: %s", audio_path, exc)
         return None
-    if proc.returncode != 0:
-        logger.debug("fpcalc stderr: %s", proc.stderr)
+
+    if ffmpeg_rc != 0:
+        logger.warning(
+            "ffmpeg segment extract failed for %s: %s",
+            audio_path,
+            ffmpeg_stderr.strip() or f"exit {ffmpeg_rc}",
+        )
         return None
-    for line in proc.stdout.splitlines():
+    if fpcalc_proc.returncode != 0:
+        logger.warning(
+            "fpcalc failed for %s: %s",
+            audio_path,
+            (fpcalc_proc.stderr or "").strip() or f"exit {fpcalc_proc.returncode}",
+        )
+        return None
+    for line in fpcalc_proc.stdout.splitlines():
         if line.startswith("FINGERPRINT="):
             return line.split("=", 1)[1].strip()
     return None
