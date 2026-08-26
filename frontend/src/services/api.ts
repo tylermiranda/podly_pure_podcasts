@@ -319,6 +319,7 @@ export const feedsApi = {
   // Get processing stats for post
   getPostStats: async (guid: string): Promise<{
     post: {
+      id?: number;
       guid: string;
       title: string;
       feed_id?: number;
