@@ -364,3 +364,53 @@ def test_update_feed_settings_no_fields_returns_400(app):
 
         assert response.status_code == 400
         assert "No settings provided" in response.get_json()["error"]
+
+
+def test_export_feeds_opml_includes_all_feeds(app):
+    import xml.etree.ElementTree as ET
+
+    with app.app_context():
+        zeta = Feed(title="Zeta Show", rss_url="https://example.com/zeta.xml")
+        alpha = Feed(title="Alpha Show", rss_url="https://example.com/alpha.xml")
+        db.session.add_all([zeta, alpha])
+        db.session.commit()
+
+        client = _make_client(app)
+        response = client.get("/api/feeds/export.opml")
+
+        assert response.status_code == 200
+        assert "application/xml" in (response.headers.get("Content-Type") or "")
+        assert 'attachment; filename="podly-feeds.opml"' in (
+            response.headers.get("Content-Disposition") or ""
+        )
+
+        root = ET.fromstring(response.get_data(as_text=True))
+        assert root.tag == "opml"
+        assert root.attrib.get("version") == "2.0"
+        assert root.findtext("./head/title") == "Podly Feeds"
+
+        outlines = root.findall("./body/outline")
+        assert len(outlines) == 2
+        assert [o.attrib["title"] for o in outlines] == ["Alpha Show", "Zeta Show"]
+        for outline in outlines:
+            assert outline.attrib["type"] == "rss"
+            assert outline.attrib["text"] == outline.attrib["title"]
+            assert outline.attrib["xmlUrl"].startswith("https://example.com/")
+
+
+def test_build_feeds_opml_escapes_special_characters(app):
+    from app.routes.feed_routes import _build_feeds_opml
+
+    with app.app_context():
+        feed = Feed(
+            title="Cats & Dogs <Best>",
+            rss_url='https://example.com/feed?a=1&b="2"',
+        )
+        opml = _build_feeds_opml([feed])
+
+        assert "&amp;" in opml
+        assert "&lt;" in opml
+        assert "&gt;" in opml
+        assert "&quot;" in opml or "&#34;" in opml
+        # Raw unescaped attribute-breaking characters must not appear
+        assert 'title="Cats & Dogs <Best>"' not in opml

@@ -12,7 +12,7 @@ from app.auth import AuthSettings
 from app.auth.middleware import init_auth_middleware
 from app.auth.state import failure_rate_limiter
 from app.extensions import db
-from app.models import Feed, Post, User
+from app.models import Feed, Post, User, UserFeed
 from app.routes.auth_routes import auth_bp
 from app.routes.feed_routes import feed_bp
 
@@ -339,3 +339,35 @@ def test_feeds_endpoint_includes_latest_episode_release_date(auth_app: Flask) ->
         == "2024-02-01T15:30:00Z"
     )
     assert feeds_by_id[undated_feed_id]["latest_episode_release_date"] is None
+
+
+def test_export_opml_respects_non_admin_feed_visibility(auth_app: Flask) -> None:
+    import xml.etree.ElementTree as ET
+
+    client = auth_app.test_client()
+
+    with auth_app.app_context():
+        joined = Feed(title="Joined Show", rss_url="https://example.com/joined.xml")
+        other = Feed(title="Other Show", rss_url="https://example.com/other.xml")
+        db.session.add_all([joined, other])
+        db.session.commit()
+
+        regular = User(username="member", role="user")
+        regular.set_password("password")
+        db.session.add(regular)
+        db.session.commit()
+
+        db.session.add(UserFeed(user_id=regular.id, feed_id=joined.id))
+        db.session.commit()
+
+        joined_url = joined.rss_url
+        other_url = other.rss_url
+
+    client.post("/api/auth/login", json={"username": "member", "password": "password"})
+    response = client.get("/api/feeds/export.opml")
+
+    assert response.status_code == 200
+    root = ET.fromstring(response.get_data(as_text=True))
+    xml_urls = {outline.attrib["xmlUrl"] for outline in root.findall("./body/outline")}
+    assert joined_url in xml_urls
+    assert other_url not in xml_urls

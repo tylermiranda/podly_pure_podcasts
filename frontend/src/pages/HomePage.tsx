@@ -141,6 +141,26 @@ export default function HomePage() {
     }
   };
 
+  const handleExportOpml = async () => {
+    try {
+      await feedsApi.exportOpml();
+      toast.success('Exported podcast feeds as OPML');
+    } catch (err) {
+      console.error('Failed to export OPML', err);
+      const { status, data, message } = getHttpErrorInfo(err);
+      emitDiagnosticError({
+        title: 'Failed to export OPML',
+        message,
+        kind: status ? 'http' : 'network',
+        details: {
+          status,
+          response: data,
+        },
+      });
+      toast.error('Failed to export OPML');
+    }
+  };
+
   const handleFeedSortChange = (nextSort: FeedSortOption) => {
     setFeedSortBy(nextSort);
     persistFeedListSortPreference(nextSort);
@@ -213,6 +233,29 @@ export default function HomePage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
               </svg>
+            </button>
+            <button
+              onClick={() => {
+                void handleExportOpml();
+              }}
+              className="h-10 w-10 shrink-0 flex items-center justify-center rounded-md border border-gray-200 text-gray-600 hover:bg-gray-100 transition-colors"
+              title="Export all podcast feeds as OPML"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                />
+              </svg>
+              <span className="sr-only">Export OPML</span>
             </button>
             <button
               onClick={() => {

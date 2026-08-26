@@ -3,6 +3,7 @@ import hashlib
 import logging
 import secrets
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from threading import Lock, Thread
 from typing import Any, cast
@@ -879,13 +880,15 @@ def get_feed_by_alt_or_url(something_or_rss: str) -> Response:
     return make_response(("Feed not found", 404))
 
 
-@feed_bp.route("/feeds", methods=["GET"])
-def api_feeds() -> ResponseReturnValue:
+def _feeds_visible_to_current_user() -> tuple[
+    list[Feed], User | None, ResponseReturnValue | None
+]:
+    """Return feeds the caller may list/export, plus the current user if known."""
     settings = current_app.config.get("AUTH_SETTINGS")
     if settings and settings.require_auth:
         user, error = _require_user_or_error()
         if error:
-            return error
+            return [], None, error
         if user and user.role != "admin":
             feeds = (
                 Feed.query.join(UserFeed, UserFeed.feed_id == Feed.id)
@@ -898,13 +901,59 @@ def api_feeds() -> ResponseReturnValue:
                 feeds.append(feed_1)
         else:
             feeds = Feed.query.all()
-        current_user = user
-    else:
-        feeds = Feed.query.all()
-        current_user = getattr(g, "current_user", None)
+        return feeds, user, None
+
+    feeds = Feed.query.all()
+    current_user = getattr(g, "current_user", None)
+    return feeds, current_user, None
+
+
+def _build_feeds_opml(feeds: list[Feed]) -> str:
+    """Build an OPML 2.0 document from upstream Feed rss_url values."""
+    root = ET.Element("opml", version="2.0")
+    head = ET.SubElement(root, "head")
+    title_el = ET.SubElement(head, "title")
+    title_el.text = "Podly Feeds"
+    body = ET.SubElement(root, "body")
+
+    for feed in sorted(feeds, key=lambda item: (item.title or "").casefold()):
+        ET.SubElement(
+            body,
+            "outline",
+            {
+                "text": feed.title or "",
+                "title": feed.title or "",
+                "type": "rss",
+                "xmlUrl": feed.rss_url or "",
+            },
+        )
+
+    xml_bytes = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+    return xml_bytes.decode("utf-8")
+
+
+@feed_bp.route("/feeds", methods=["GET"])
+def api_feeds() -> ResponseReturnValue:
+    feeds, current_user, error = _feeds_visible_to_current_user()
+    if error:
+        return error
 
     feeds_data = [_serialize_feed(feed, current_user=current_user) for feed in feeds]
     return jsonify(feeds_data)
+
+
+@feed_bp.route("/api/feeds/export.opml", methods=["GET"])
+def export_feeds_opml() -> ResponseReturnValue:
+    feeds, _current_user, error = _feeds_visible_to_current_user()
+    if error:
+        return error
+
+    response = Response(
+        _build_feeds_opml(feeds),
+        mimetype="application/xml; charset=utf-8",
+    )
+    response.headers["Content-Disposition"] = 'attachment; filename="podly-feeds.opml"'
+    return response
 
 
 @feed_bp.route("/api/feeds/<int:feed_id>/join", methods=["POST"])

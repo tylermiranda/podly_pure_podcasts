@@ -124,6 +124,22 @@ export const feedsApi = {
     return response.data;
   },
 
+  exportOpml: async (): Promise<void> => {
+    const response = await api.get('/api/feeds/export.opml', {
+      responseType: 'blob',
+    });
+
+    const blob = new Blob([response.data], { type: 'application/xml' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'podly-feeds.opml';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
+
   togglePostWhitelist: async (
     guid: string,
     whitelisted: boolean,
