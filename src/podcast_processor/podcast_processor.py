@@ -466,14 +466,30 @@ class PodcastProcessor:
                 post=post,
                 windows=removed_segments_sec,
                 segments=transcript_segments,
-                min_chars=int(
-                    getattr(self.config, "ad_creative_min_chars", 24) or 24
-                ),
+                min_chars=int(getattr(self.config, "ad_creative_min_chars", 24) or 24),
             )
-        except Exception:  # noqa: BLE001
-            self.logger.exception(
-                "Failed to upsert ad creatives for post %s", post.id
-            )
+        except Exception:
+            self.logger.exception("Failed to upsert ad creatives for post %s", post.id)
+        if bool(getattr(self.config, "enable_ad_audio_fingerprint", True)):
+            try:
+                from podcast_processor.ad_audio_fingerprint import (
+                    upsert_from_cut_windows,
+                )
+
+                upsert_from_cut_windows(
+                    post=post,
+                    windows=removed_segments_sec,
+                    audio_path=unprocessed_audio_path,
+                    kind="creative",
+                    min_duration=float(
+                        getattr(self.config, "ad_audio_fp_min_duration_seconds", 3.0)
+                        or 3.0
+                    ),
+                )
+            except Exception:
+                self.logger.exception(
+                    "Failed to upsert audio fingerprints for post %s", post.id
+                )
 
         chapters_for_output = []
         chapter_source = "none"
@@ -1007,13 +1023,28 @@ class PodcastProcessor:
             min_confidence=float(self.config.output.min_confidence),
         )
         draft = merge_time_windows(labeled_cut_windows(eligible), gap_seconds=1.0)
+        audio_gaps: list[tuple[float, float]] | None = None
+        if bool(getattr(self.config, "enable_ad_gap_detection", False)):
+            from podcast_processor.ad_audio_gaps import detect_suspicious_gaps
+
+            audio_path = getattr(post, "unprocessed_audio_path", None)
+            if audio_path:
+                audio_gaps = detect_suspicious_gaps(
+                    audio_path=str(audio_path),
+                    segments=transcript_segments,
+                    min_seconds=float(
+                        getattr(self.config, "ad_gap_min_seconds", 4.0) or 4.0
+                    ),
+                    noise_db=int(getattr(self.config, "ad_gap_noise_db", -30) or -30),
+                )
         try:
             AdVerifier(self.config, self.logger).verify_and_store(
                 post=post,
                 draft_windows=draft,
                 segments=transcript_segments,
+                audio_gaps=audio_gaps,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.logger.exception(
                 "Ad verify failed for post %s; continuing with draft labels",
                 post.id,

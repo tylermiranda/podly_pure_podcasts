@@ -43,6 +43,7 @@ interface CorrectionRow {
 interface TranscriptCorrectionPanelProps {
   episodeGuid: string;
   feedId: number;
+  postId: number;
   canEdit: boolean;
   hasUnprocessedAudio: boolean;
   segments: TranscriptSegmentRow[];
@@ -138,6 +139,7 @@ function snapToWords(
 export default function TranscriptCorrectionPanel({
   episodeGuid,
   feedId,
+  postId,
   canEdit,
   hasUnprocessedAudio,
   segments,
@@ -309,6 +311,46 @@ export default function TranscriptCorrectionPanel({
       setStatus(null);
       setError(getHttpErrorInfo(err).message);
       await refreshStatsOnly();
+    },
+  });
+
+  const jingleMutation = useMutation({
+    mutationFn: async () => {
+      const groups = contiguousIndexGroups(selectedIndexes, segments);
+      let start: number;
+      let end: number;
+      if (groups.length === 1) {
+        const rows = groups[0].map((index) => segments[index]);
+        const snapped = snapToWords(
+          rows[0].start_time,
+          rows[rows.length - 1].end_time,
+          rows
+        );
+        start = snapped.start;
+        end = snapped.end;
+      } else {
+        start = Number(startTime);
+        end = Number(endTime);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+          throw new Error('Select one contiguous span or enter start/end times.');
+        }
+      }
+      return feedsApi.createJingleTemplate(feedId, {
+        post_id: postId,
+        start_time: start,
+        end_time: end,
+      });
+    },
+    onSuccess: async () => {
+      setError(null);
+      setStatus('Saved jingle template for this feed.');
+      toast.success('Jingle template saved');
+      clearSelection();
+      await refreshStatsOnly();
+    },
+    onError: (err: unknown) => {
+      setStatus(null);
+      setError(getHttpErrorInfo(err).message);
     },
   });
 
@@ -541,6 +583,22 @@ export default function TranscriptCorrectionPanel({
                 className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
                 {saveMutation.isPending ? 'Saving…' : 'Mark content'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStatus('Saving jingle template…');
+                  jingleMutation.mutate();
+                }}
+                disabled={
+                  saveMutation.isPending ||
+                  recutMutation.isPending ||
+                  jingleMutation.isPending ||
+                  !hasUnprocessedAudio
+                }
+                className="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {jingleMutation.isPending ? 'Saving…' : 'Save as jingle template'}
               </button>
               <button
                 type="button"

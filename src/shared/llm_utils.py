@@ -36,6 +36,23 @@ def model_uses_max_completion_tokens(model_name: str | None) -> bool:
     return any(pattern in model_lower for pattern in _MAX_COMPLETION_TOKEN_MODELS)
 
 
+def resolve_llm_model(
+    config: object,
+    override_attr: str,
+    *,
+    fallback_attr: str = "llm_model",
+    default: str = "gpt-4o",
+) -> str:
+    """Return override model when set, otherwise the primary classify model."""
+    override = getattr(config, override_attr, None)
+    if isinstance(override, str) and override.strip():
+        return override.strip()
+    fallback = getattr(config, fallback_attr, None)
+    if isinstance(fallback, str) and fallback.strip():
+        return fallback.strip()
+    return default
+
+
 def supports_json_object_response_format(base_url: str | None) -> bool:
     """Return True when the API accepts response_format type=json_object.
 

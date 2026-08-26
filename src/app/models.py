@@ -162,6 +162,7 @@ class Post(db.Model):  # type: ignore[name-defined, misc]
     # audio processor to cut ads using refined (intra-segment) timestamps.
     refined_ad_boundaries = db.Column(db.JSON, nullable=True)
     refined_ad_boundaries_updated_at = db.Column(db.DateTime, nullable=True)
+    ad_detection_debug = db.Column(db.JSON, nullable=True)
 
     segments = db.relationship(
         "TranscriptSegment",
@@ -411,6 +412,50 @@ class AdCreative(db.Model):  # type: ignore[name-defined, misc]
         return f"<AdCreative {self.id} feed={self.feed_id} hits={self.hit_count}>"
 
 
+class AdAudioFingerprint(db.Model):  # type: ignore[name-defined, misc]
+    """Chromaprint audio fingerprint for repeated creatives or jingles."""
+
+    __tablename__ = "ad_audio_fingerprint"
+
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    feed_id = db.Column(
+        db.Integer, db.ForeignKey("feed.id"), nullable=False, index=True
+    )
+    prompt_tag_id = db.Column(
+        db.Integer, db.ForeignKey("tag.id"), nullable=True, index=True
+    )
+    kind = db.Column(db.String(16), nullable=False, default="creative")
+    fingerprint = db.Column(db.Text, nullable=False)
+    duration_seconds = db.Column(db.Float, nullable=False)
+    source_post_id = db.Column(db.Integer, db.ForeignKey("post.id"), nullable=True)
+    source_start = db.Column(db.Float, nullable=True)
+    source_end = db.Column(db.Float, nullable=True)
+    hit_count = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=_utc_now_naive, onupdate=_utc_now_naive
+    )
+
+    feed = db.relationship(
+        "Feed", backref=db.backref("ad_audio_fingerprints", lazy="dynamic")
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "feed_id",
+            "fingerprint",
+            "kind",
+            name="uq_ad_audio_fp_feed_fingerprint_kind",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AdAudioFingerprint {self.id} feed={self.feed_id} "
+            f"kind={self.kind} hits={self.hit_count}>"
+        )
+
+
 class JobsManagerRun(db.Model):  # type: ignore[name-defined, misc]
     __tablename__ = "jobs_manager_run"
 
@@ -552,6 +597,52 @@ class LLMSettings(db.Model):  # type: ignore[name-defined, misc]
         default=DEFAULTS.ENABLE_AD_VERIFY,
     )
     llm_verify_model = db.Column(db.Text, nullable=True)
+    llm_boundary_refine_model = db.Column(db.Text, nullable=True)
+    enable_two_stage_classify = db.Column(
+        db.Boolean, nullable=False, default=DEFAULTS.ENABLE_TWO_STAGE_CLASSIFY
+    )
+    two_stage_edge_preroll_seconds = db.Column(
+        db.Integer,
+        nullable=False,
+        default=DEFAULTS.TWO_STAGE_EDGE_PREROLL_SECONDS,
+    )
+    two_stage_edge_outro_seconds = db.Column(
+        db.Integer,
+        nullable=False,
+        default=DEFAULTS.TWO_STAGE_EDGE_OUTRO_SECONDS,
+    )
+    two_stage_candidate_pad_segments = db.Column(
+        db.Integer,
+        nullable=False,
+        default=DEFAULTS.TWO_STAGE_CANDIDATE_PAD_SEGMENTS,
+    )
+    enable_ad_audio_fingerprint = db.Column(
+        db.Boolean, nullable=False, default=DEFAULTS.ENABLE_AD_AUDIO_FINGERPRINT
+    )
+    ad_audio_fp_match_threshold = db.Column(
+        db.Float, nullable=False, default=DEFAULTS.AD_AUDIO_FP_MATCH_THRESHOLD
+    )
+    ad_audio_fp_min_duration_seconds = db.Column(
+        db.Float, nullable=False, default=DEFAULTS.AD_AUDIO_FP_MIN_DURATION_SECONDS
+    )
+    enable_ad_gap_detection = db.Column(
+        db.Boolean, nullable=False, default=DEFAULTS.ENABLE_AD_GAP_DETECTION
+    )
+    ad_gap_min_seconds = db.Column(
+        db.Float, nullable=False, default=DEFAULTS.AD_GAP_MIN_SECONDS
+    )
+    ad_gap_noise_db = db.Column(
+        db.Integer, nullable=False, default=DEFAULTS.AD_GAP_NOISE_DB
+    )
+    enable_ad_gap_auto_cut = db.Column(
+        db.Boolean, nullable=False, default=DEFAULTS.ENABLE_AD_GAP_AUTO_CUT
+    )
+    jingle_min_seconds = db.Column(
+        db.Float, nullable=False, default=DEFAULTS.JINGLE_MIN_SECONDS
+    )
+    jingle_max_seconds = db.Column(
+        db.Float, nullable=False, default=DEFAULTS.JINGLE_MAX_SECONDS
+    )
 
     created_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)
     updated_at = db.Column(db.DateTime, nullable=False, default=_utc_now_naive)

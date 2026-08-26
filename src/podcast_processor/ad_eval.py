@@ -143,9 +143,7 @@ def score_windows_detailed(
     """Extended metrics: F1, boundary MAE, false-cut / residual-ad seconds."""
     preds = merge_windows(predicted, gap_seconds=gap_seconds)
     golds = merge_windows(gold, gap_seconds=gap_seconds)
-    base = score_windows(
-        preds, golds, iou_threshold=iou_threshold, gap_seconds=0.0
-    )
+    base = score_windows(preds, golds, iou_threshold=iou_threshold, gap_seconds=0.0)
 
     _tp, _ious, matched = _match_windows(preds, golds, iou_threshold=iou_threshold)
     if matched:

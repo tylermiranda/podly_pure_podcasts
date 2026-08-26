@@ -45,7 +45,7 @@ export default function ConfigTabs() {
 
   const activeSubtab = useMemo<AdvancedSubtab>(() => {
     const urlSubtab = searchParams.get('section') as AdvancedSubtab | null;
-    if (urlSubtab && ['llm', 'whisper', 'processing', 'output', 'app'].includes(urlSubtab)) {
+    if (urlSubtab && ['llm', 'whisper', 'processing', 'output', 'app', 'ad_detection'].includes(urlSubtab)) {
       return urlSubtab;
     }
     return 'llm';

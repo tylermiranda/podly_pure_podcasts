@@ -163,6 +163,10 @@ class CommandExecutor:
             writer_actions.mark_ad_corrections_stale_action,
         )
         self.register_action(
+            "upsert_jingle_template",
+            writer_actions.upsert_jingle_template_action,
+        )
+        self.register_action(
             "update_user_last_active", writer_actions.update_user_last_active_action
         )
 

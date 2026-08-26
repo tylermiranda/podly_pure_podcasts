@@ -1,7 +1,6 @@
-from types import SimpleNamespace
-
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from podcast_processor.ad_eval import (
     score_windows,
@@ -95,10 +94,7 @@ def test_score_windows_detailed_metrics() -> None:
 
 def test_salvador_dali_gold_fixture_json_matches_module() -> None:
     path = (
-        Path(__file__).resolve().parent
-        / "fixtures"
-        / "ad_gold"
-        / "salvador_dali.json"
+        Path(__file__).resolve().parent / "fixtures" / "ad_gold" / "salvador_dali.json"
     )
     data = json.loads(path.read_text(encoding="utf-8"))
     windows = [(float(s), float(e)) for s, e in data["windows"]]

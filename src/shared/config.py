@@ -125,6 +125,77 @@ class Config(BaseModel):
             "Optional dedicated model for ad verify. Falls back to llm_model when unset."
         ),
     )
+    llm_boundary_refine_model: str | None = Field(
+        default=DEFAULTS.LLM_BOUNDARY_REFINE_MODEL,
+        description=(
+            "Optional dedicated model for ad boundary refinement. "
+            "Falls back to llm_model when unset."
+        ),
+    )
+    enable_two_stage_classify: bool = Field(
+        default=DEFAULTS.ENABLE_TWO_STAGE_CLASSIFY,
+        description=(
+            "When enabled, run LLM classify only on candidate spans "
+            "(cues, creatives, audio FP, gaps, edges)."
+        ),
+    )
+    two_stage_edge_preroll_seconds: int = Field(
+        default=DEFAULTS.TWO_STAGE_EDGE_PREROLL_SECONDS,
+        ge=0,
+        description="Always include the first N seconds as classify candidates.",
+    )
+    two_stage_edge_outro_seconds: int = Field(
+        default=DEFAULTS.TWO_STAGE_EDGE_OUTRO_SECONDS,
+        ge=0,
+        description="Always include the last N seconds as classify candidates.",
+    )
+    two_stage_candidate_pad_segments: int = Field(
+        default=DEFAULTS.TWO_STAGE_CANDIDATE_PAD_SEGMENTS,
+        ge=0,
+        description="Pad candidate spans by this many transcript segments for LLM context.",
+    )
+    enable_ad_audio_fingerprint: bool = Field(
+        default=DEFAULTS.ENABLE_AD_AUDIO_FINGERPRINT,
+        description="Index and match Chromaprint audio fingerprints for repeated ads.",
+    )
+    ad_audio_fp_match_threshold: float = Field(
+        default=DEFAULTS.AD_AUDIO_FP_MATCH_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Maximum normalized bit distance for audio fingerprint match.",
+    )
+    ad_audio_fp_min_duration_seconds: float = Field(
+        default=DEFAULTS.AD_AUDIO_FP_MIN_DURATION_SECONDS,
+        ge=0.5,
+        description="Minimum audio window duration to fingerprint for creatives.",
+    )
+    enable_ad_gap_detection: bool = Field(
+        default=DEFAULTS.ENABLE_AD_GAP_DETECTION,
+        description="Detect non-silent audio with no transcript as ad candidates.",
+    )
+    ad_gap_min_seconds: float = Field(
+        default=DEFAULTS.AD_GAP_MIN_SECONDS,
+        ge=0.5,
+        description="Minimum duration for suspicious audio-only gaps.",
+    )
+    ad_gap_noise_db: int = Field(
+        default=DEFAULTS.AD_GAP_NOISE_DB,
+        description="ffmpeg silencedetect noise threshold (dB).",
+    )
+    enable_ad_gap_auto_cut: bool = Field(
+        default=DEFAULTS.ENABLE_AD_GAP_AUTO_CUT,
+        description="Auto-label audio gaps as ads without LLM confirmation (aggressive).",
+    )
+    jingle_min_seconds: float = Field(
+        default=DEFAULTS.JINGLE_MIN_SECONDS,
+        ge=0.5,
+        description="Minimum jingle template duration.",
+    )
+    jingle_max_seconds: float = Field(
+        default=DEFAULTS.JINGLE_MAX_SECONDS,
+        ge=1.0,
+        description="Maximum jingle template duration.",
+    )
     ad_creative_min_chars: int = Field(
         default=DEFAULTS.AD_CREATIVE_MIN_CHARS,
         ge=8,

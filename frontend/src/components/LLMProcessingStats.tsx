@@ -594,6 +594,7 @@ export default function LLMProcessingStats({
               <TranscriptCorrectionPanel
                 episodeGuid={episodeGuid}
                 feedId={stats.post?.feed_id ?? 0}
+                postId={stats.post?.id ?? 0}
                 canEdit={canEditCorrections}
                 hasUnprocessedAudio={Boolean(stats.post?.has_unprocessed_audio)}
                 segments={stats.transcript_segments || []}

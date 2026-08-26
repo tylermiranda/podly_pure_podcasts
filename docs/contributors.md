@@ -307,6 +307,19 @@ This will run all the necessary checks including:
 3. Create a Pull Request with a clear description of the changes
 4. Link any related issues
 
+### Ad detection reliability (P1)
+
+P1 adds optional signals under **Config → Advanced → Ad detection**:
+
+- `llm_boundary_refine_model` — cheap dedicated model for boundary refine (Tower: pair with fast OpenRouter flash)
+- `enable_two_stage_classify` — LLM only on candidate spans
+- `enable_ad_audio_fingerprint` — Chromaprint index (requires `fpcalc` / Docker `chromaprint-tools`)
+- `enable_ad_gap_detection` — ffmpeg `silencedetect` candidates + verify hints
+
+Apply DB migration after pulling: `./scripts/create_migration.sh` is not needed if `e7f8a9b0c1d2` is present; otherwise run Alembic upgrade. Enable knobs per feed on Tower after gold eval (`scripts/eval_ad_detection.py`).
+
+Local E2E smoke: `PODLY_WRITER_LOCAL_FALLBACK=1 uv run python scripts/e2e_ad_detection_p1.py`
+
 ### Code Style
 
 - We use ruff for code formatting

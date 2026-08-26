@@ -492,3 +492,69 @@ def mark_ad_corrections_stale_action(params: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("post_id is required")
     updated = mark_ad_corrections_stale_for_post(int(post_id))
     return {"post_id": int(post_id), "updated": updated}
+
+
+def upsert_jingle_template_action(params: dict[str, Any]) -> dict[str, Any]:
+    """Extract audio slice fingerprint and upsert as kind=jingle for a feed."""
+    from app.config_store import to_pydantic_config
+    from podcast_processor.ad_audio_fingerprint import (
+        fingerprint_window,
+        upsert_fingerprint,
+    )
+
+    feed_id = params.get("feed_id")
+    post_id = params.get("post_id")
+    start_time = params.get("start_time")
+    end_time = params.get("end_time")
+    if feed_id is None or post_id is None:
+        raise ValueError("feed_id and post_id are required")
+    if start_time is None or end_time is None:
+        raise ValueError("start_time and end_time are required")
+
+    start = float(start_time)
+    end = float(end_time)
+    if end <= start:
+        raise ValueError("end_time must be greater than start_time")
+
+    config = to_pydantic_config()
+    duration = end - start
+    min_s = float(getattr(config, "jingle_min_seconds", 1.0) or 1.0)
+    max_s = float(getattr(config, "jingle_max_seconds", 15.0) or 15.0)
+    if duration < min_s or duration > max_s:
+        raise ValueError(
+            f"jingle duration must be between {min_s}s and {max_s}s (got {duration:.1f}s)"
+        )
+
+    post = db.session.get(Post, int(post_id))
+    if post is None:
+        raise ValueError(f"Post {post_id} not found")
+    if int(post.feed_id) != int(feed_id):
+        raise ValueError("post does not belong to feed")
+
+    audio_path = post.unprocessed_audio_path or post.processed_audio_path
+    if not audio_path:
+        raise ValueError("post has no audio file to fingerprint")
+
+    fingerprint = fingerprint_window(str(audio_path), start, end)
+    if not fingerprint:
+        raise ValueError("failed to fingerprint audio (is fpcalc installed?)")
+
+    feed = getattr(post, "feed", None)
+    upsert_fingerprint(
+        feed_id=int(feed_id),
+        fingerprint=fingerprint,
+        duration_seconds=duration,
+        kind="jingle",
+        source_post_id=post.id,
+        source_start=start,
+        source_end=end,
+        prompt_tag_id=getattr(feed, "prompt_tag_id", None) if feed else None,
+        commit=True,
+    )
+    return {
+        "feed_id": int(feed_id),
+        "post_id": post.id,
+        "start_time": start,
+        "end_time": end,
+        "kind": "jingle",
+    }

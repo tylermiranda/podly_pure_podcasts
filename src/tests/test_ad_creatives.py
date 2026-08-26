@@ -64,9 +64,7 @@ def test_extract_creative_texts_from_windows() -> None:
             text="It is July the 1st, 1936.",
         ),
     ]
-    texts = extract_creative_texts_from_windows(
-        segments, [(0.0, 10.0)], min_chars=24
-    )
+    texts = extract_creative_texts_from_windows(segments, [(0.0, 10.0)], min_chars=24)
     assert len(texts) == 1
     assert "example.com" in texts[0]
 

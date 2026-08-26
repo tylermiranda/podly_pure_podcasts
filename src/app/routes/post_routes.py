@@ -657,6 +657,7 @@ def api_post_stats(p_guid: str) -> flask.Response:
 
     stats_data = {
         "post": {
+            "id": post.id,
             "guid": post.guid,
             "title": post.title,
             "feed_id": post.feed_id,
@@ -708,6 +709,10 @@ def api_post_stats(p_guid: str) -> flask.Response:
         "suggested_prompt": suggested_prompt,
         "custom_llm_ad_prompt": custom_llm_ad_prompt,
     }
+
+    ad_detection_debug = getattr(post, "ad_detection_debug", None)
+    if isinstance(ad_detection_debug, dict) and ad_detection_debug:
+        stats_data["ad_detection"] = ad_detection_debug
 
     if _env_bool("PODLY_STATS_DEBUG", default=False):
         candidates = get_processed_audio_path_candidates(

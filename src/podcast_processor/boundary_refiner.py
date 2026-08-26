@@ -15,6 +15,7 @@ from jinja2 import Template
 
 from app.writer.client import writer_client
 from shared.config import Config
+from shared.llm_utils import resolve_llm_model
 
 # Internal defaults for boundary expansion; not user-configurable.
 MAX_START_EXTENSION_SECONDS = 30.0
@@ -34,6 +35,11 @@ class BoundaryRefiner:
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self.template = self._load_template()
+
+    def _model_name(self) -> str:
+        return resolve_llm_model(
+            self.config, "llm_boundary_refine_model", fallback_attr="llm_model"
+        )
 
     def _load_template(self) -> Template:
         path = (
@@ -102,7 +108,7 @@ Return JSON: {"refined_start": {{ad_start}}, "refined_end": {{ad_end}}, "start_r
                     "upsert_model_call",
                     {
                         "post_id": post_id,
-                        "model_name": self.config.llm_model,
+                        "model_name": self._model_name(),
                         "first_segment_sequence_num": first_seq_num,
                         "last_segment_sequence_num": last_seq_num,
                         "prompt": prompt,
@@ -120,7 +126,7 @@ Return JSON: {"refined_start": {{ad_start}}, "refined_end": {{ad_end}}, "start_r
 
         try:
             response = litellm.completion(
-                model=self.config.llm_model,
+                model=self._model_name(),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=4096,
@@ -142,7 +148,7 @@ Return JSON: {"refined_start": {{ad_start}}, "refined_end": {{ad_end}}, "start_r
             self.logger.debug(
                 "LLM response received",
                 extra={
-                    "model": self.config.llm_model,
+                    "model": self._model_name(),
                     "content_preview": content[:200],
                 },
             )
@@ -152,7 +158,7 @@ Return JSON: {"refined_start": {{ad_start}}, "refined_end": {{ad_end}}, "start_r
                 "LLM response raw (%s chars, preview up to 1000): %r",
                 len(content),
                 raw_preview,
-                extra={"model": self.config.llm_model},
+                extra={"model": self._model_name()},
             )
             # Log the full response object so provider quirks are visible.
             try:

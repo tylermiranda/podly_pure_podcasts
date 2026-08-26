@@ -109,6 +109,20 @@ def ensure_defaults() -> None:
             "enable_llm_chapter_fallback_tagging": DEFAULTS.ENABLE_LLM_CHAPTER_FALLBACK_TAGGING,
             "enable_ad_verify": DEFAULTS.ENABLE_AD_VERIFY,
             "llm_verify_model": DEFAULTS.LLM_VERIFY_MODEL,
+            "llm_boundary_refine_model": DEFAULTS.LLM_BOUNDARY_REFINE_MODEL,
+            "enable_two_stage_classify": DEFAULTS.ENABLE_TWO_STAGE_CLASSIFY,
+            "two_stage_edge_preroll_seconds": DEFAULTS.TWO_STAGE_EDGE_PREROLL_SECONDS,
+            "two_stage_edge_outro_seconds": DEFAULTS.TWO_STAGE_EDGE_OUTRO_SECONDS,
+            "two_stage_candidate_pad_segments": DEFAULTS.TWO_STAGE_CANDIDATE_PAD_SEGMENTS,
+            "enable_ad_audio_fingerprint": DEFAULTS.ENABLE_AD_AUDIO_FINGERPRINT,
+            "ad_audio_fp_match_threshold": DEFAULTS.AD_AUDIO_FP_MATCH_THRESHOLD,
+            "ad_audio_fp_min_duration_seconds": DEFAULTS.AD_AUDIO_FP_MIN_DURATION_SECONDS,
+            "enable_ad_gap_detection": DEFAULTS.ENABLE_AD_GAP_DETECTION,
+            "ad_gap_min_seconds": DEFAULTS.AD_GAP_MIN_SECONDS,
+            "ad_gap_noise_db": DEFAULTS.AD_GAP_NOISE_DB,
+            "enable_ad_gap_auto_cut": DEFAULTS.ENABLE_AD_GAP_AUTO_CUT,
+            "jingle_min_seconds": DEFAULTS.JINGLE_MIN_SECONDS,
+            "jingle_max_seconds": DEFAULTS.JINGLE_MAX_SECONDS,
         },
     )
 
@@ -217,6 +231,58 @@ def read_combined() -> dict[str, Any]:
                 llm, "enable_ad_verify", DEFAULTS.ENABLE_AD_VERIFY
             ),
             "llm_verify_model": getattr(llm, "llm_verify_model", None),
+            "llm_boundary_refine_model": getattr(
+                llm, "llm_boundary_refine_model", None
+            ),
+            "enable_two_stage_classify": getattr(
+                llm, "enable_two_stage_classify", DEFAULTS.ENABLE_TWO_STAGE_CLASSIFY
+            ),
+            "two_stage_edge_preroll_seconds": getattr(
+                llm,
+                "two_stage_edge_preroll_seconds",
+                DEFAULTS.TWO_STAGE_EDGE_PREROLL_SECONDS,
+            ),
+            "two_stage_edge_outro_seconds": getattr(
+                llm,
+                "two_stage_edge_outro_seconds",
+                DEFAULTS.TWO_STAGE_EDGE_OUTRO_SECONDS,
+            ),
+            "two_stage_candidate_pad_segments": getattr(
+                llm,
+                "two_stage_candidate_pad_segments",
+                DEFAULTS.TWO_STAGE_CANDIDATE_PAD_SEGMENTS,
+            ),
+            "enable_ad_audio_fingerprint": getattr(
+                llm, "enable_ad_audio_fingerprint", DEFAULTS.ENABLE_AD_AUDIO_FINGERPRINT
+            ),
+            "ad_audio_fp_match_threshold": getattr(
+                llm,
+                "ad_audio_fp_match_threshold",
+                DEFAULTS.AD_AUDIO_FP_MATCH_THRESHOLD,
+            ),
+            "ad_audio_fp_min_duration_seconds": getattr(
+                llm,
+                "ad_audio_fp_min_duration_seconds",
+                DEFAULTS.AD_AUDIO_FP_MIN_DURATION_SECONDS,
+            ),
+            "enable_ad_gap_detection": getattr(
+                llm, "enable_ad_gap_detection", DEFAULTS.ENABLE_AD_GAP_DETECTION
+            ),
+            "ad_gap_min_seconds": getattr(
+                llm, "ad_gap_min_seconds", DEFAULTS.AD_GAP_MIN_SECONDS
+            ),
+            "ad_gap_noise_db": getattr(
+                llm, "ad_gap_noise_db", DEFAULTS.AD_GAP_NOISE_DB
+            ),
+            "enable_ad_gap_auto_cut": getattr(
+                llm, "enable_ad_gap_auto_cut", DEFAULTS.ENABLE_AD_GAP_AUTO_CUT
+            ),
+            "jingle_min_seconds": getattr(
+                llm, "jingle_min_seconds", DEFAULTS.JINGLE_MIN_SECONDS
+            ),
+            "jingle_max_seconds": getattr(
+                llm, "jingle_max_seconds", DEFAULTS.JINGLE_MAX_SECONDS
+            ),
         },
         "whisper": whisper_payload,
         "processing": {
@@ -261,6 +327,20 @@ def _update_section_llm(data: dict[str, Any]) -> None:
         "enable_llm_chapter_fallback_tagging",
         "enable_ad_verify",
         "llm_verify_model",
+        "llm_boundary_refine_model",
+        "enable_two_stage_classify",
+        "two_stage_edge_preroll_seconds",
+        "two_stage_edge_outro_seconds",
+        "two_stage_candidate_pad_segments",
+        "enable_ad_audio_fingerprint",
+        "ad_audio_fp_match_threshold",
+        "ad_audio_fp_min_duration_seconds",
+        "enable_ad_gap_detection",
+        "ad_gap_min_seconds",
+        "ad_gap_noise_db",
+        "enable_ad_gap_auto_cut",
+        "jingle_min_seconds",
+        "jingle_max_seconds",
     ]:
         if key in data:
             new_val = data[key]
@@ -548,6 +628,75 @@ def to_pydantic_config() -> PydanticConfig:
         ),
         llm_verify_model=data["llm"].get("llm_verify_model")
         or DEFAULTS.LLM_VERIFY_MODEL,
+        llm_boundary_refine_model=data["llm"].get("llm_boundary_refine_model")
+        or DEFAULTS.LLM_BOUNDARY_REFINE_MODEL,
+        enable_two_stage_classify=bool(
+            data["llm"].get(
+                "enable_two_stage_classify", DEFAULTS.ENABLE_TWO_STAGE_CLASSIFY
+            )
+        ),
+        two_stage_edge_preroll_seconds=int(
+            data["llm"].get(
+                "two_stage_edge_preroll_seconds",
+                DEFAULTS.TWO_STAGE_EDGE_PREROLL_SECONDS,
+            )
+            or DEFAULTS.TWO_STAGE_EDGE_PREROLL_SECONDS
+        ),
+        two_stage_edge_outro_seconds=int(
+            data["llm"].get(
+                "two_stage_edge_outro_seconds",
+                DEFAULTS.TWO_STAGE_EDGE_OUTRO_SECONDS,
+            )
+            or DEFAULTS.TWO_STAGE_EDGE_OUTRO_SECONDS
+        ),
+        two_stage_candidate_pad_segments=int(
+            data["llm"].get(
+                "two_stage_candidate_pad_segments",
+                DEFAULTS.TWO_STAGE_CANDIDATE_PAD_SEGMENTS,
+            )
+            or DEFAULTS.TWO_STAGE_CANDIDATE_PAD_SEGMENTS
+        ),
+        enable_ad_audio_fingerprint=bool(
+            data["llm"].get(
+                "enable_ad_audio_fingerprint", DEFAULTS.ENABLE_AD_AUDIO_FINGERPRINT
+            )
+        ),
+        ad_audio_fp_match_threshold=float(
+            data["llm"].get(
+                "ad_audio_fp_match_threshold",
+                DEFAULTS.AD_AUDIO_FP_MATCH_THRESHOLD,
+            )
+            or DEFAULTS.AD_AUDIO_FP_MATCH_THRESHOLD
+        ),
+        ad_audio_fp_min_duration_seconds=float(
+            data["llm"].get(
+                "ad_audio_fp_min_duration_seconds",
+                DEFAULTS.AD_AUDIO_FP_MIN_DURATION_SECONDS,
+            )
+            or DEFAULTS.AD_AUDIO_FP_MIN_DURATION_SECONDS
+        ),
+        enable_ad_gap_detection=bool(
+            data["llm"].get("enable_ad_gap_detection", DEFAULTS.ENABLE_AD_GAP_DETECTION)
+        ),
+        ad_gap_min_seconds=float(
+            data["llm"].get("ad_gap_min_seconds", DEFAULTS.AD_GAP_MIN_SECONDS)
+            or DEFAULTS.AD_GAP_MIN_SECONDS
+        ),
+        ad_gap_noise_db=int(
+            data["llm"].get("ad_gap_noise_db", DEFAULTS.AD_GAP_NOISE_DB)
+            or DEFAULTS.AD_GAP_NOISE_DB
+        ),
+        enable_ad_gap_auto_cut=bool(
+            data["llm"].get("enable_ad_gap_auto_cut", DEFAULTS.ENABLE_AD_GAP_AUTO_CUT)
+        ),
+        jingle_min_seconds=float(
+            data["llm"].get("jingle_min_seconds", DEFAULTS.JINGLE_MIN_SECONDS)
+            or DEFAULTS.JINGLE_MIN_SECONDS
+        ),
+        jingle_max_seconds=float(
+            data["llm"].get("jingle_max_seconds", DEFAULTS.JINGLE_MAX_SECONDS)
+            or DEFAULTS.JINGLE_MAX_SECONDS
+        ),
         ad_creative_min_chars=int(
             data.get("processing", {}).get(
                 "ad_creative_min_chars", DEFAULTS.AD_CREATIVE_MIN_CHARS

@@ -163,9 +163,7 @@ def match_segment_to_creatives(
     return best
 
 
-def format_creative_prompt_hints(
-    creatives: list[Any], *, max_items: int = 8
-) -> str:
+def format_creative_prompt_hints(creatives: list[Any], *, max_items: int = 8) -> str:
     if not creatives:
         return ""
     lines = ["Known sponsor creatives for this show (treat matching lines as ads):"]
@@ -190,9 +188,7 @@ def upsert_from_post_cut_windows(
         return 0
     feed = getattr(post, "feed", None)
     prompt_tag_id = getattr(feed, "prompt_tag_id", None) if feed is not None else None
-    texts = extract_creative_texts_from_windows(
-        segments, windows, min_chars=min_chars
-    )
+    texts = extract_creative_texts_from_windows(segments, windows, min_chars=min_chars)
     if not texts:
         return 0
     return upsert_creatives_for_feed(

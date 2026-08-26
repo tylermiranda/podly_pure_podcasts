@@ -171,6 +171,59 @@ class AdClassifier:
         )
 
         total_segments = len(transcript_segments)
+        candidate_index_set: set[int] | None = None
+        detection_debug: dict[str, Any] = {}
+
+        signals = self._collect_ad_detection_signals(transcript_segments, post)
+        detection_debug.update(signals.get("debug", {}))
+
+        if signals.get("gap_windows"):
+            detection_debug.setdefault("gap_candidates", len(signals["gap_windows"]))
+
+        if bool(getattr(self.config, "enable_two_stage_classify", False)):
+            from podcast_processor.ad_candidates import (
+                build_candidate_spans,
+                candidate_indices,
+                format_candidate_summary,
+            )
+
+            spans = build_candidate_spans(
+                segments=transcript_segments,
+                cue_detector=self.cue_detector,
+                creatives=signals.get("creatives") or [],
+                creative_jaccard=float(
+                    getattr(self.config, "ad_creative_jaccard", 0.85) or 0.85
+                ),
+                audio_fp_windows=signals.get("audio_fp_windows"),
+                gap_windows=signals.get("gap_windows"),
+                jingle_windows=signals.get("jingle_windows"),
+                preroll_seconds=float(
+                    getattr(self.config, "two_stage_edge_preroll_seconds", 120) or 120
+                ),
+                outro_seconds=float(
+                    getattr(self.config, "two_stage_edge_outro_seconds", 60) or 60
+                ),
+                pad_segments=int(
+                    getattr(self.config, "two_stage_candidate_pad_segments", 5) or 5
+                ),
+            )
+            indices = candidate_indices(spans)
+            detection_debug["candidate_span_count"] = len(spans)
+            if indices:
+                candidate_index_set = indices
+                summary = format_candidate_summary(spans)
+                if summary:
+                    classify_params.system_prompt = (
+                        f"{classify_params.system_prompt}\n\n{summary}"
+                    )
+            else:
+                self.logger.info(
+                    "Two-stage classify: empty candidate set for post %s; "
+                    "falling back to full sliding window",
+                    post.id,
+                )
+
+        self._store_ad_detection_debug(post, detection_debug)
 
         try:
             current_index = 0
@@ -180,6 +233,17 @@ class AdClassifier:
             )  # Safety limit to prevent infinite loops
             iteration_count = 0
             while current_index < total_segments and iteration_count < max_iterations:
+                if candidate_index_set is not None:
+                    if current_index not in candidate_index_set:
+                        next_index = self._next_candidate_index(
+                            current_index, candidate_index_set, total_segments
+                        )
+                        if next_index is None:
+                            break
+                        current_index = next_index
+                        next_overlap_segments = []
+                        continue
+
                 consumed_segments, next_overlap_segments = self._step(
                     classify_params,
                     next_overlap_segments,
@@ -194,6 +258,25 @@ class AdClassifier:
                         "Breaking to avoid infinite loop."
                     )
                     break
+
+            if signals.get("gap_windows") and bool(
+                getattr(self.config, "enable_ad_gap_auto_cut", False)
+            ):
+                self._seed_time_window_labels(
+                    transcript_segments,
+                    post,
+                    signals["gap_windows"],
+                    source="audio_gap",
+                )
+            for window_key in ("audio_fp_windows", "jingle_windows"):
+                windows = signals.get(window_key) or []
+                if windows:
+                    self._seed_time_window_labels(
+                        transcript_segments,
+                        post,
+                        windows,
+                        source=window_key.replace("_windows", ""),
+                    )
 
             self._apply_sponsor_cue_labels(transcript_segments, post)
             self._label_repeated_creatives(transcript_segments, post)
@@ -303,6 +386,203 @@ class AdClassifier:
             )
 
         return consumed_segments, next_overlap_segments
+
+    @staticmethod
+    def _next_candidate_index(
+        current_index: int, candidate_indices: set[int], total_segments: int
+    ) -> int | None:
+        for idx in range(current_index, total_segments):
+            if idx in candidate_indices:
+                return idx
+        return None
+
+    def _collect_ad_detection_signals(
+        self,
+        transcript_segments: list[TranscriptSegment],
+        post: Post,
+    ) -> dict[str, Any]:
+        """Gather audio FP, gap, and creative signals for candidates / seeding."""
+        debug: dict[str, Any] = {}
+        creatives: list[Any] = []
+        audio_fp_windows: list[tuple[float, float]] = []
+        jingle_windows: list[tuple[float, float]] = []
+        gap_windows: list[tuple[float, float]] = []
+
+        if post.feed_id is not None:
+            from podcast_processor.ad_creatives import load_feed_creatives
+
+            feed = getattr(post, "feed", None)
+            creatives = load_feed_creatives(
+                feed_id=int(post.feed_id),
+                prompt_tag_id=getattr(feed, "prompt_tag_id", None),
+            )
+
+        audio_path = getattr(post, "unprocessed_audio_path", None)
+        if audio_path and bool(
+            getattr(self.config, "enable_ad_audio_fingerprint", True)
+        ):
+            from podcast_processor.ad_audio_fingerprint import (
+                fpcalc_available,
+                load_feed_fingerprints,
+                match_windows_around_candidates,
+                scan_episode_for_matches,
+            )
+
+            if fpcalc_available() and post.feed_id is not None:
+                threshold = float(
+                    getattr(self.config, "ad_audio_fp_match_threshold", 0.15) or 0.15
+                )
+                feed = getattr(post, "feed", None)
+                prompt_tag_id = (
+                    getattr(feed, "prompt_tag_id", None) if feed is not None else None
+                )
+                creative_catalog = load_feed_fingerprints(
+                    feed_id=int(post.feed_id),
+                    kind="creative",
+                    prompt_tag_id=prompt_tag_id,
+                )
+                jingle_catalog = load_feed_fingerprints(
+                    feed_id=int(post.feed_id),
+                    kind="jingle",
+                    prompt_tag_id=prompt_tag_id,
+                )
+                audio_fp_windows.extend(
+                    scan_episode_for_matches(
+                        audio_path=str(audio_path),
+                        catalog=creative_catalog,
+                        threshold=threshold,
+                    )
+                )
+                jingle_windows.extend(
+                    scan_episode_for_matches(
+                        audio_path=str(audio_path),
+                        catalog=jingle_catalog,
+                        threshold=threshold,
+                        hop_seconds=15.0,
+                        scan_limit_seconds=max(
+                            float(
+                                getattr(transcript_segments[-1], "end_time", 0.0) or 0.0
+                            ),
+                            180.0,
+                        )
+                        if transcript_segments
+                        else 180.0,
+                        window_seconds=8.0,
+                    )
+                )
+                cue_windows = [
+                    (
+                        float(seg.start_time or 0.0),
+                        float(seg.end_time or seg.start_time or 0.0),
+                    )
+                    for seg in transcript_segments
+                    if self._has_fallback_ad_cue(seg.text or "")
+                ]
+                if cue_windows:
+                    audio_fp_windows.extend(
+                        match_windows_around_candidates(
+                            audio_path=str(audio_path),
+                            catalog=creative_catalog,
+                            candidate_windows=cue_windows,
+                            threshold=threshold,
+                        )
+                    )
+                debug["audio_fp_hits"] = len(audio_fp_windows)
+                debug["jingle_hits"] = len(jingle_windows)
+
+        if audio_path and bool(getattr(self.config, "enable_ad_gap_detection", False)):
+            from podcast_processor.ad_audio_gaps import detect_suspicious_gaps
+
+            gap_windows = detect_suspicious_gaps(
+                audio_path=str(audio_path),
+                segments=transcript_segments,
+                min_seconds=float(
+                    getattr(self.config, "ad_gap_min_seconds", 4.0) or 4.0
+                ),
+                noise_db=int(getattr(self.config, "ad_gap_noise_db", -30) or -30),
+            )
+            debug["gap_candidates"] = len(gap_windows)
+
+        return {
+            "creatives": creatives,
+            "audio_fp_windows": audio_fp_windows,
+            "jingle_windows": jingle_windows,
+            "gap_windows": gap_windows,
+            "debug": debug,
+        }
+
+    def _seed_time_window_labels(
+        self,
+        transcript_segments: list[TranscriptSegment],
+        post: Post,
+        windows: list[tuple[float, float]],
+        *,
+        source: str,
+    ) -> int:
+        if not windows:
+            return 0
+        model_call = self._latest_llm_model_call(post.id)
+        if model_call is None:
+            return 0
+        existing_ids = {
+            row[0]
+            for row in self.db_session.query(Identification.transcript_segment_id)
+            .join(TranscriptSegment)
+            .filter(
+                TranscriptSegment.post_id == post.id,
+                Identification.label == "ad",
+            )
+            .all()
+        }
+        to_insert: list[dict[str, Any]] = []
+        min_conf = float(self.config.output.min_confidence)
+        for segment in transcript_segments:
+            if segment.id in existing_ids:
+                continue
+            seg_start = float(segment.start_time or 0.0)
+            seg_end = float(segment.end_time or seg_start)
+            if not any(seg_start < we and seg_end > ws for ws, we in windows):
+                continue
+            window = apply_content_guard_to_span(segment, seg_start, seg_end)
+            if window is None:
+                continue
+            to_insert.append(
+                self._identification_row(
+                    segment=segment,
+                    model_call=model_call,
+                    confidence=max(0.92, min_conf),
+                    start=window[0],
+                    end=window[1],
+                )
+            )
+            existing_ids.add(segment.id)
+        if not to_insert:
+            return 0
+        created = self._create_identifications_bulk(to_insert)
+        self.logger.info(
+            "Seeded %s %s ad labels for post %s",
+            created,
+            source,
+            post.id,
+        )
+        return created
+
+    def _store_ad_detection_debug(self, post: Post, debug: dict[str, Any]) -> None:
+        if not debug:
+            return
+        try:
+            writer_client.update(
+                "Post",
+                post.id,
+                {"ad_detection_debug": debug},
+                wait=True,
+            )
+        except Exception:  # noqa: BLE001
+            self.logger.debug(
+                "Failed to store ad_detection_debug for post %s",
+                post.id,
+                exc_info=True,
+            )
 
     def _process_chunk(
         self,

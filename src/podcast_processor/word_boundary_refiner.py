@@ -22,6 +22,7 @@ from podcast_processor.llm_model_call_utils import (
     try_update_model_call,
 )
 from shared.config import Config
+from shared.llm_utils import resolve_llm_model
 
 # Keep the same internal bounds as the existing BoundaryRefiner.
 MAX_START_EXTENSION_SECONDS = 30.0
@@ -43,6 +44,11 @@ class WordBoundaryRefiner:
         self.config = config
         self.logger = logger or logging.getLogger(__name__)
         self.template = self._load_template()
+
+    def _model_name(self) -> str:
+        return resolve_llm_model(
+            self.config, "llm_boundary_refine_model", fallback_attr="llm_model"
+        )
 
     def _load_template(self) -> Template:
         path = (
@@ -89,7 +95,7 @@ Return only one JSON object (no markdown/code fences, no analysis text) with:
             post_id=post_id,
             first_seq_num=first_seq_num,
             last_seq_num=last_seq_num,
-            model_name=self.config.llm_model,
+            model_name=self._model_name(),
             logger=self.logger,
             log_prefix="Word boundary refine",
         )
@@ -98,7 +104,7 @@ Return only one JSON object (no markdown/code fences, no analysis text) with:
 
         try:
             response = litellm.completion(
-                model=self.config.llm_model,
+                model=self._model_name(),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=4096,

@@ -781,6 +781,46 @@ def update_feed_settings_endpoint(feed_id: int) -> ResponseReturnValue:
     return jsonify(_serialize_feed(feed, current_user=getattr(g, "current_user", None)))
 
 
+@feed_bp.route("/api/feeds/<int:feed_id>/jingle-templates", methods=["POST"])
+def create_jingle_template(feed_id: int) -> ResponseReturnValue:
+    """Save a selected audio range as a feed-scoped jingle fingerprint template."""
+    _, error_response = require_admin("save jingle templates")
+    if error_response is not None:
+        return error_response
+
+    feed = Feed.query.get(feed_id)
+    if feed is None:
+        return jsonify({"error": "Feed not found"}), 404
+
+    payload = request.get_json(silent=True) or {}
+    post_id = payload.get("post_id")
+    if post_id is None:
+        return jsonify({"error": "post_id is required"}), 400
+
+    post = Post.query.get(int(post_id))
+    if post is None or int(post.feed_id) != feed_id:
+        return jsonify({"error": "Post not found for feed"}), 404
+
+    result = writer_client.action(
+        "upsert_jingle_template",
+        {
+            "feed_id": feed_id,
+            "post_id": post.id,
+            "start_time": payload.get("start_time"),
+            "end_time": payload.get("end_time"),
+        },
+        wait=True,
+    )
+    if result is None or not result.success:
+        return (
+            jsonify(
+                {"error": getattr(result, "error", "Failed to save jingle template")}
+            ),
+            500,
+        )
+    return jsonify(result.data or {}), 201
+
+
 @feed_bp.route("/api/feeds/<int:feed_id>/subscribers", methods=["GET"])
 def get_feed_subscribers(feed_id: int) -> ResponseReturnValue:
     """Return subscriber list for a feed (admin only)."""

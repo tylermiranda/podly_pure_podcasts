@@ -145,6 +145,22 @@ export interface LLMConfig {
   enable_boundary_refinement: boolean;
   enable_word_level_boundary_refinder?: boolean;
   enable_llm_chapter_fallback_tagging?: boolean;
+  enable_ad_verify?: boolean;
+  llm_verify_model?: string | null;
+  llm_boundary_refine_model?: string | null;
+  enable_two_stage_classify?: boolean;
+  two_stage_edge_preroll_seconds?: number;
+  two_stage_edge_outro_seconds?: number;
+  two_stage_candidate_pad_segments?: number;
+  enable_ad_audio_fingerprint?: boolean;
+  ad_audio_fp_match_threshold?: number;
+  ad_audio_fp_min_duration_seconds?: number;
+  enable_ad_gap_detection?: boolean;
+  ad_gap_min_seconds?: number;
+  ad_gap_noise_db?: number;
+  enable_ad_gap_auto_cut?: boolean;
+  jingle_min_seconds?: number;
+  jingle_max_seconds?: number;
 }
 
 export type WhisperConfig =

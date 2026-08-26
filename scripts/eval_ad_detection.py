@@ -12,6 +12,11 @@ Usage (from repo root, with app import path):
     --guid e60d215e-7c7c-11f1-8d29-b70ac5a24b6a
 
 When --guid is set, loads the Flask app and scores final_cut_windows for that post.
+
+P1 ablation: toggle knobs in Config → Ad detection, reprocess watched feeds, and
+compare F1/MAE/false-cut seconds across baseline → +two-stage → +audio FP → +gaps.
+Episode debug counts (audio_fp_hits, gap_candidates, jingle_hits) appear in stats
+when ad_detection_debug is populated on the post.
 """
 
 from __future__ import annotations
@@ -98,9 +103,7 @@ def _predicted_from_db(guid: str) -> list[tuple[float, float]]:
             model_calls,
             min_confidence=float(runtime_config.output.min_confidence),
         )
-        refined = parse_refined_windows(
-            getattr(post, "refined_ad_boundaries", None)
-        )
+        refined = parse_refined_windows(getattr(post, "refined_ad_boundaries", None))
         corrections = load_active_corrections_for_post(post.id)
         _labeled, effective = final_cut_windows(
             eligible,

@@ -154,6 +154,7 @@ def _suspicious_gap_lines(
     segments: list[Any],
     *,
     cue_detector: CueDetector | None = None,
+    audio_gaps: list[tuple[float, float]] | None = None,
 ) -> str:
     detector = cue_detector or CueDetector()
     covered: list[tuple[float, float]] = list(draft_windows)
@@ -171,6 +172,13 @@ def _suspicious_gap_lines(
             continue
         snippet = text if len(text) <= 160 else text[:157] + "..."
         lines.append(f"SUSPECT {start:.1f}-{end:.1f} {snippet}")
+    for gap_start, gap_end in audio_gaps or []:
+        in_draft = any(gap_start < we and gap_end > ws for ws, we in covered)
+        if in_draft:
+            continue
+        lines.append(
+            f"SUSPECT_GAP {gap_start:.1f}-{gap_end:.1f} (audio without transcript)"
+        )
     if not lines:
         return "(none)"
     return "\n".join(lines[:40])
@@ -204,9 +212,10 @@ def build_verify_messages(
     draft_windows: list[tuple[float, float]],
     segments: list[Any],
     title: str | None = None,
+    audio_gaps: list[tuple[float, float]] | None = None,
 ) -> list[dict[str, str]]:
     draft_block = _format_window_block(draft_windows, segments)
-    suspects = _suspicious_gap_lines(draft_windows, segments)
+    suspects = _suspicious_gap_lines(draft_windows, segments, audio_gaps=audio_gaps)
     user = (
         f"Episode: {title or '(untitled)'}\n\n"
         f"Draft cut windows with transcript context:\n{draft_block or '(none)'}\n\n"
@@ -238,6 +247,7 @@ class AdVerifier:
         post: Any,
         draft_windows: list[tuple[float, float]],
         segments: list[Any],
+        audio_gaps: list[tuple[float, float]] | None = None,
     ) -> list[tuple[float, float]]:
         """Run verify, persist refined_ad_boundaries, return verified windows."""
         if not draft_windows and not segments:
@@ -247,6 +257,7 @@ class AdVerifier:
             draft_windows=draft_windows,
             segments=segments,
             title=getattr(post, "title", None),
+            audio_gaps=audio_gaps,
         )
         verified = apply_verify_adjustments(draft_windows, adjustments)
         # If LLM returned nothing useful, keep draft.
@@ -270,7 +281,7 @@ class AdVerifier:
                 raise RuntimeError(
                     getattr(res, "error", "Failed to store verified ad boundaries")
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.logger.exception(
                 "Failed to persist verified boundaries for post %s",
                 getattr(post, "id", None),
@@ -292,6 +303,7 @@ class AdVerifier:
         draft_windows: list[tuple[float, float]],
         segments: list[Any],
         title: str | None,
+        audio_gaps: list[tuple[float, float]] | None = None,
     ) -> list[dict[str, Any]]:
         import litellm
 
@@ -305,6 +317,7 @@ class AdVerifier:
             draft_windows=draft_windows,
             segments=segments,
             title=title,
+            audio_gaps=audio_gaps,
         )
         model_name = self._model_name()
         completion_args: dict[str, Any] = {
@@ -328,6 +341,6 @@ class AdVerifier:
             response = litellm.completion(**completion_args)
             content = extract_litellm_content(response).strip()
             return parse_verify_response(content)
-        except Exception:  # noqa: BLE001
+        except Exception:
             self.logger.exception("Ad verify LLM call failed; keeping draft windows")
             return []

@@ -177,6 +177,20 @@ export const feedsApi = {
     return response.data;
   },
 
+  createJingleTemplate: async (
+    feedId: number,
+    payload: { post_id: number; start_time: number; end_time: number }
+  ): Promise<{
+    feed_id: number;
+    post_id: number;
+    start_time: number;
+    end_time: number;
+    kind: string;
+  }> => {
+    const response = await api.post(`/api/feeds/${feedId}/jingle-templates`, payload);
+    return response.data;
+  },
+
   getSubscribers: async (feedId: number): Promise<FeedSubscribersResponse> => {
     const response = await api.get(`/api/feeds/${feedId}/subscribers`);
     return response.data;

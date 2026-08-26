@@ -1,10 +1,37 @@
 """Unit tests for ad verify adjustment application."""
 
+from types import SimpleNamespace
+
 from podcast_processor.ad_verifier import (
+    _suspicious_gap_lines,
     apply_verify_adjustments,
+    build_verify_messages,
     parse_verify_response,
     windows_to_refined_payload,
 )
+
+
+def test_suspicious_gap_lines_includes_audio_gaps() -> None:
+    segments = [
+        SimpleNamespace(start_time=0.0, end_time=5.0, text="hello world"),
+    ]
+    text = _suspicious_gap_lines(
+        [(20.0, 30.0)],
+        segments,
+        audio_gaps=[(5.0, 15.0)],
+    )
+    assert "SUSPECT_GAP" in text
+    assert "5.0-15.0" in text
+
+
+def test_build_verify_messages_includes_audio_gaps() -> None:
+    messages = build_verify_messages(
+        draft_windows=[(10.0, 20.0)],
+        segments=[],
+        title="Episode",
+        audio_gaps=[(50.0, 60.0)],
+    )
+    assert "SUSPECT_GAP" in messages[1]["content"]
 
 
 def test_apply_verify_expands_and_drops() -> None:

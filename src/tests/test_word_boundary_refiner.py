@@ -227,3 +227,11 @@ def test_refine_end_uses_segment_seq_without_phrase() -> None:
     assert err is None
     assert changed is True
     assert refined_end == 205.0
+
+
+def test_refine_uses_boundary_refine_model_override() -> None:
+    config = create_standard_test_config()
+    config.llm_model = "groq/classify-model"
+    config.llm_boundary_refine_model = "openrouter/fast-refine"
+    refiner = WordBoundaryRefiner(config=config)
+    assert refiner._model_name() == "openrouter/fast-refine"
