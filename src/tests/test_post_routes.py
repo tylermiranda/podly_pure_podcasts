@@ -857,6 +857,46 @@ def test_post_stats_omits_debug_info_when_disabled(app):
     ]
 
 
+def test_post_stats_includes_ad_detection_debug(app):
+    app.testing = True
+    app.register_blueprint(post_bp)
+
+    with app.app_context():
+        feed = Feed(title="Stats Feed", rss_url="https://example.com/feed.xml")
+        db.session.add(feed)
+        db.session.commit()
+
+        post = Post(
+            feed_id=feed.id,
+            guid="stats-ad-detection-guid",
+            download_url="https://example.com/audio.mp3",
+            title="Ad Detection Stats Episode",
+            whitelisted=True,
+            ad_detection_debug={
+                "audio_fp_hits": 3,
+                "jingle_hits": 1,
+                "gap_candidates": 2,
+                "candidate_span_count": 7,
+            },
+        )
+        db.session.add(post)
+        db.session.commit()
+        guid = post.guid
+
+    client = app.test_client()
+    response = client.get(f"/api/posts/{guid}/stats")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload is not None
+    assert payload["ad_detection"] == {
+        "audio_fp_hits": 3,
+        "jingle_hits": 1,
+        "gap_candidates": 2,
+        "candidate_span_count": 7,
+    }
+
+
 def test_post_stats_include_chapters_for_chapter_insert_strategy(app):
     app.testing = True
     app.register_blueprint(post_bp)

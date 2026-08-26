@@ -13,6 +13,77 @@ interface LLMProcessingStatsProps {
 
 type TabId = 'overview' | 'model-calls' | 'transcript' | 'identifications';
 
+type AdDetectionStats = {
+  audio_fp_hits?: number;
+  jingle_hits?: number;
+  gap_candidates?: number;
+  candidate_span_count?: number;
+};
+
+function buildAdDetectionCoachingTips(
+  adDetection: AdDetectionStats | undefined,
+  totalSegments: number,
+): string[] {
+  if (!adDetection) {
+    return [
+      'Reprocess this episode after changing ad detection settings in Config → Advanced → Ad detection.',
+      'Counts appear here after the LLM classify pass completes.',
+    ];
+  }
+
+  const tips: string[] = [];
+  const fpHits = adDetection.audio_fp_hits ?? 0;
+  const jingleHits = adDetection.jingle_hits ?? 0;
+  const gapCandidates = adDetection.gap_candidates ?? 0;
+  const candidateSpans = adDetection.candidate_span_count ?? 0;
+
+  if (fpHits > 0) {
+    tips.push(
+      `Audio FP hits (${fpHits}): fingerprint index matched saved creatives — good sign before enabling two-stage classify.`,
+    );
+  } else {
+    tips.push(
+      'Audio FP hits are 0: save repeating ad audio from Transcript corrections, or confirm this episode has no indexed creatives yet.',
+    );
+  }
+
+  if (jingleHits > 0) {
+    tips.push(
+      `Jingle hits (${jingleHits}): saved jingle templates matched in this episode.`,
+    );
+  } else {
+    tips.push(
+      'Jingle hits are 0: select a short intro/outro stinger in Transcript → Save as jingle template, then reprocess future episodes.',
+    );
+  }
+
+  if (gapCandidates > 0) {
+    tips.push(
+      `Gap candidates (${gapCandidates}): untranscribed audio regions were flagged — compare cuts on this episode before leaving gap detection enabled.`,
+    );
+  } else {
+    tips.push(
+      'Gap candidates are 0: only populated when silence/gap detection is on. Enable it for music-only ad breaks, reprocess, and check again.',
+    );
+  }
+
+  if (candidateSpans > 0) {
+    tips.push(
+      `Candidate spans (${candidateSpans}): two-stage would LLM-scan these regions only. Enable when baseline cuts are good and this count is modest compared to ${totalSegments || 'total'} transcript segments.`,
+    );
+  } else {
+    tips.push(
+      'Candidate spans are 0: only populated when two-stage classify is on. Enable for a test reprocess — want > 0 but not covering most of the episode.',
+    );
+  }
+
+  tips.push(
+    'Decision rule: leave a knob on only if cuts look as good or better after reprocess — not because a count is high.',
+  );
+
+  return tips;
+}
+
 export default function LLMProcessingStats({
   episodeGuid,
   hasProcessedAudio,
@@ -207,6 +278,61 @@ export default function LLMProcessingStats({
                             </div>
                             <div className="text-sm text-red-800 dark:text-red-100">Ad Segments Removed</div>
                           </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h3 className="font-semibold text-gray-900 mb-2 text-left">Ad Detection Signals</h3>
+                        <p className="text-sm text-gray-600 mb-4 text-left">
+                          Counts from the last LLM classification pass. Use these to sanity-check
+                          Config → Advanced → Ad detection before turning on the next knob.
+                        </p>
+                        {stats.ad_detection ? (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="rounded-lg border border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100 p-4 text-center">
+                              <div className="text-2xl font-bold text-purple-700">
+                                {stats.ad_detection.audio_fp_hits ?? 0}
+                              </div>
+                              <div className="text-sm text-purple-900">Audio FP hits</div>
+                              <div className="text-xs text-purple-700 mt-1">Saved creative fingerprints matched</div>
+                            </div>
+                            <div className="rounded-lg border border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100 p-4 text-center">
+                              <div className="text-2xl font-bold text-indigo-700">
+                                {stats.ad_detection.jingle_hits ?? 0}
+                              </div>
+                              <div className="text-sm text-indigo-900">Jingle hits</div>
+                              <div className="text-xs text-indigo-700 mt-1">Saved jingle templates matched</div>
+                            </div>
+                            <div className="rounded-lg border border-amber-200 bg-gradient-to-br from-amber-50 to-amber-100 p-4 text-center">
+                              <div className="text-2xl font-bold text-amber-700">
+                                {stats.ad_detection.gap_candidates ?? 0}
+                              </div>
+                              <div className="text-sm text-amber-900">Gap candidates</div>
+                              <div className="text-xs text-amber-700 mt-1">Requires gap detection enabled</div>
+                            </div>
+                            <div className="rounded-lg border border-teal-200 bg-gradient-to-br from-teal-50 to-teal-100 p-4 text-center">
+                              <div className="text-2xl font-bold text-teal-700">
+                                {stats.ad_detection.candidate_span_count ?? 0}
+                              </div>
+                              <div className="text-sm text-teal-900">Candidate spans</div>
+                              <div className="text-xs text-teal-700 mt-1">Requires two-stage classify enabled</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 text-left">
+                            No signal counts yet. Reprocess this episode after changing ad detection settings.
+                          </div>
+                        )}
+                        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-left">
+                          <h4 className="text-sm font-semibold text-blue-900 mb-2">What to do with these numbers</h4>
+                          <ul className="list-disc list-inside space-y-1 text-sm text-blue-900">
+                            {buildAdDetectionCoachingTips(
+                              stats.ad_detection,
+                              stats.processing_stats?.total_segments ?? 0,
+                            ).map((tip) => (
+                              <li key={tip}>{tip}</li>
+                            ))}
+                          </ul>
                         </div>
                       </div>
 

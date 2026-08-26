@@ -467,6 +467,12 @@ export const feedsApi = {
       label: 'ad' | 'content' | null;
     };
     custom_llm_ad_prompt?: string | null;
+    ad_detection?: {
+      audio_fp_hits?: number;
+      jingle_hits?: number;
+      gap_candidates?: number;
+      candidate_span_count?: number;
+    };
   }> => {
     const response = await api.get(`/api/posts/${guid}/stats`);
     return response.data;

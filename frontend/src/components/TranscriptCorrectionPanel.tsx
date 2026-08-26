@@ -612,6 +612,11 @@ export default function TranscriptCorrectionPanel({
                 {recutMutation.isPending ? 'Recutting…' : 'Recut audio'}
               </button>
             </div>
+            <p className="mt-2 text-xs text-indigo-700 text-left">
+              <strong>Save as jingle template</strong> stores a short audio fingerprint for this feed
+              (intro/outro stingers). After reprocessing, check Stats → Ad Detection Signals for{' '}
+              <em>Jingle hits</em>. For repeating full ad reads, use corrections + feed prompt instead.
+            </p>
             {status && <p className="mt-2 text-sm text-indigo-800">{status}</p>}
             {error && (
               <div className="mt-2 flex flex-wrap items-center gap-3">
