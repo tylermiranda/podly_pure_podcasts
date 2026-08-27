@@ -275,6 +275,17 @@ export default function TranscriptCorrectionPanel({
     };
   }, []);
 
+  useEffect(() => {
+    if (!completionMessage) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        dismissCompletionAlert();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [completionMessage, dismissCompletionAlert]);
+
   const refreshStatsOnly = async () => {
     await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
     await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
@@ -638,23 +649,6 @@ export default function TranscriptCorrectionPanel({
               (intro/outro stingers). After reprocessing, check Stats → Ad Detection Signals for{' '}
               <em>Jingle hits</em>. For repeating full ad reads, use corrections + feed prompt instead.
             </p>
-            {completionMessage && (
-              <div
-                role="status"
-                className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border-2 border-emerald-500 bg-emerald-50 px-3 py-3 text-left dark:border-emerald-400 dark:bg-emerald-950"
-              >
-                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-                  {completionMessage}
-                </p>
-                <button
-                  type="button"
-                  onClick={dismissCompletionAlert}
-                  className="rounded bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800"
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
             {status && <p className="mt-2 text-sm text-indigo-800">{status}</p>}
             {error && (
               <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -827,6 +821,41 @@ export default function TranscriptCorrectionPanel({
           </div>
         )}
       </div>
+
+      {completionMessage && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="improve-recut-done-title"
+          onClick={dismissCompletionAlert}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-emerald-200 bg-white p-6 shadow-2xl dark:border-emerald-700 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p
+              id="improve-recut-done-title"
+              className="text-left text-lg font-semibold text-emerald-900 dark:text-emerald-100"
+            >
+              Done
+            </p>
+            <p className="mt-2 text-left text-sm text-slate-700 dark:text-slate-200">
+              {completionMessage}
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                autoFocus
+                onClick={dismissCompletionAlert}
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
