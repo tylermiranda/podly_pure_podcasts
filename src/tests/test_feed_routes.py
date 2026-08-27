@@ -127,7 +127,7 @@ def test_add_feed_with_language_on_new_feed(app):
             feed = Feed(title="New Feed", rss_url=_url, language=language)
             db.session.add(feed)
             db.session.commit()
-            return feed
+            return feed, True
 
         with (
             mock.patch(
@@ -175,7 +175,8 @@ def test_add_feed_existing_language_preserved_in_writer(app):
 
         with (
             mock.patch(
-                "app.routes.feed_routes.add_or_refresh_feed", return_value=existing
+                "app.routes.feed_routes.add_or_refresh_feed",
+                return_value=(existing, False),
             ),
             mock.patch("app.routes.feed_routes.Thread"),
             mock.patch("app.routes.feed_routes.writer_client") as mock_route_writer,
@@ -214,7 +215,8 @@ def test_add_feed_sets_existing_feed_language_via_writer(app):
 
         with (
             mock.patch(
-                "app.routes.feed_routes.add_or_refresh_feed", return_value=existing
+                "app.routes.feed_routes.add_or_refresh_feed",
+                return_value=(existing, False),
             ),
             mock.patch("app.routes.feed_routes.Thread"),
             mock.patch("app.feeds.writer_client") as mock_feed_writer,
@@ -285,7 +287,7 @@ def test_add_feed_writer_failure_returns_500_before_enqueue(app):
             db.session.add(feed)
             db.session.commit()
             created["feed"] = feed
-            return feed
+            return feed, True
 
         with (
             mock.patch(
@@ -337,7 +339,8 @@ def test_add_feed_no_language_leaves_null(app):
 
         with (
             mock.patch(
-                "app.routes.feed_routes.add_or_refresh_feed", return_value=existing
+                "app.routes.feed_routes.add_or_refresh_feed",
+                return_value=(existing, False),
             ),
             mock.patch("app.routes.feed_routes.Thread"),
         ):

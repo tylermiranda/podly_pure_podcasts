@@ -146,6 +146,7 @@ export interface LLMConfig {
   enable_word_level_boundary_refinder?: boolean;
   enable_llm_chapter_fallback_tagging?: boolean;
   enable_ad_verify?: boolean;
+  auto_generate_show_prompt?: boolean;
   llm_verify_model?: string | null;
   llm_boundary_refine_model?: string | null;
   enable_two_stage_classify?: boolean;

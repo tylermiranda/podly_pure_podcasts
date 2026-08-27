@@ -596,6 +596,11 @@ class LLMSettings(db.Model):  # type: ignore[name-defined, misc]
         nullable=False,
         default=DEFAULTS.ENABLE_AD_VERIFY,
     )
+    auto_generate_show_prompt = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=DEFAULTS.AUTO_GENERATE_SHOW_PROMPT,
+    )
     llm_verify_model = db.Column(db.Text, nullable=True)
     llm_boundary_refine_model = db.Column(db.Text, nullable=True)
     enable_two_stage_classify = db.Column(

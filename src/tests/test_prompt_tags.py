@@ -199,7 +199,7 @@ class TestAddFeedPromptTag:
             )
             db.session.add(feed)
             db.session.commit()
-            return feed
+            return feed, True
 
         with (
             mock.patch(
@@ -259,7 +259,7 @@ class TestAddFeedPromptTag:
         client = app.test_client()
 
         def fake_add_or_refresh(_url, language=None, prompt_tag_id=None):
-            return db.session.get(Feed, feed_id)
+            return db.session.get(Feed, feed_id), False
 
         def writer_update_side_effect(model_name, model_id, updates, wait=True):
             assert model_name == "Feed"

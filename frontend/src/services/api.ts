@@ -177,6 +177,16 @@ export const feedsApi = {
     return response.data;
   },
 
+  generateShowPrompt: async (
+    feedId: number,
+    options: { force?: boolean } = {}
+  ): Promise<{ custom_llm_ad_prompt: string }> => {
+    const response = await api.post(`/api/feeds/${feedId}/generate-show-prompt`, {
+      force: options.force ?? false,
+    });
+    return response.data;
+  },
+
   createJingleTemplate: async (
     feedId: number,
     payload: { post_id: number; start_time: number; end_time: number }

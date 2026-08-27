@@ -58,6 +58,7 @@ export default function FeedSettingsModal({
     feed.prompt_tag_id ?? ''
   );
   const [showTagsManager, setShowTagsManager] = useState(false);
+  const [generateError, setGenerateError] = useState('');
 
   const { data: tags = [] } = useQuery({
     queryKey: ['tags'],
@@ -93,6 +94,25 @@ export default function FeedSettingsModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['feeds'] });
       onClose();
+    },
+  });
+
+  const generateMutation = useMutation({
+    mutationFn: () => feedsApi.generateShowPrompt(feed.id, { force: true }),
+    onSuccess: (data) => {
+      setGenerateError('');
+      setCustomLlmAdPrompt(data.custom_llm_ad_prompt || '');
+      queryClient.invalidateQueries({ queryKey: ['feeds'] });
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === 'object' && 'response' in err
+          ? String(
+              (err as { response?: { data?: { error?: string } } }).response?.data
+                ?.error || 'Failed to generate show prompt.'
+            )
+          : 'Failed to generate show prompt.';
+      setGenerateError(message);
     },
   });
 
@@ -355,9 +375,22 @@ export default function FeedSettingsModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Custom Ad Detection Instructions
-            </label>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className="block text-sm font-medium text-gray-700">
+                Custom Ad Detection Instructions
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setGenerateError('');
+                  generateMutation.mutate();
+                }}
+                disabled={generateMutation.isPending}
+                className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {generateMutation.isPending ? 'Generating…' : 'Generate with AI'}
+              </button>
+            </div>
             <textarea
               value={customLlmAdPrompt}
               onChange={(e) => setCustomLlmAdPrompt(e.target.value)}
@@ -367,8 +400,12 @@ export default function FeedSettingsModal({
             />
             <p className="text-xs text-gray-500 mt-1">
               Optional custom instructions appended after the prompt tag (if any)
-              to the LLM system prompt for ad detection.
+              to the LLM system prompt for ad detection. New feeds can auto-generate
+              this from RSS and light web research.
             </p>
+            {generateError && (
+              <p className="mt-1 text-xs text-red-600">{generateError}</p>
+            )}
           </div>
 
           <div className="border-t border-gray-200" />

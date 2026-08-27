@@ -85,6 +85,18 @@ export default function AdDetectionSection() {
           />
         </Field>
         <Field
+          label="Auto-generate show prompt on add"
+          hint="When a new podcast is added, research RSS/directory/website and write Custom Ad Detection Instructions automatically."
+        >
+          <input
+            type="checkbox"
+            checked={llm?.auto_generate_show_prompt ?? true}
+            onChange={(e) =>
+              setField(['llm', 'auto_generate_show_prompt'], e.target.checked)
+            }
+          />
+        </Field>
+        <Field
           label="Verify model (optional)"
           hint="Use the same fast flash model as boundary refine for verify when possible."
         >

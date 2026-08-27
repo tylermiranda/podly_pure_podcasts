@@ -739,7 +739,12 @@ def add_or_refresh_feed(
     url: str,
     language: str | None = None,
     prompt_tag_id: int | None = None,
-) -> Feed:
+) -> tuple[Feed, bool]:
+    """Add a new feed or refresh an existing one.
+
+    Returns ``(feed, created)`` where ``created`` is True only when a new Feed
+    row was written (not a refresh of an existing RSS URL).
+    """
     feed_data = fetch_feed(url)
     if "title" not in feed_data.feed:
         logger.error("Invalid feed URL")
@@ -750,9 +755,9 @@ def add_or_refresh_feed(
         ensure_requested_feed_language(feed, language)
         ensure_requested_feed_prompt_tag(feed, prompt_tag_id)
         refresh_feed(feed)
-    else:
-        feed = add_feed(feed_data, language=language, prompt_tag_id=prompt_tag_id)
-    return feed
+        return feed, False
+    feed = add_feed(feed_data, language=language, prompt_tag_id=prompt_tag_id)
+    return feed, True
 
 
 def add_feed(

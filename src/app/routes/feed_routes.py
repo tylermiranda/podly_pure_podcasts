@@ -241,12 +241,16 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
             if allowance_error:
                 return allowance_error
 
-        feed = add_or_refresh_feed(url, language=language, prompt_tag_id=prompt_tag_id)
+        feed, created = add_or_refresh_feed(
+            url, language=language, prompt_tag_id=prompt_tag_id
+        )
         ensure_requested_feed_language(feed, language)
         ensure_requested_feed_prompt_tag(feed, prompt_tag_id)
         if user:
-            created, previous_count = ensure_user_feed_membership(feed, user.id)
-            if created and previous_count == 0:
+            created_membership, previous_count = ensure_user_feed_membership(
+                feed, user.id
+            )
+            if created_membership and previous_count == 0:
                 whitelist_latest_for_first_member(feed, getattr(user, "id", None))
         elif not is_auth_enabled():
             # In no-auth mode, if this feed has no members, trigger whitelisting for the latest post.
@@ -260,6 +264,13 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
             daemon=True,
             name="enqueue-jobs-after-add",
         ).start()
+        if created:
+            Thread(
+                target=_auto_generate_show_prompt_async,
+                args=(app, feed.id),
+                daemon=True,
+                name=f"show-prompt-gen-{feed.id}",
+            ).start()
         return redirect(url_for("main.index"))
     except Exception as e:  # noqa: BLE001
         logger.error(f"Error adding feed: {e}")
@@ -872,6 +883,59 @@ def _enqueue_pending_jobs_async(app: Flask) -> None:
             get_jobs_manager().enqueue_pending_jobs(trigger="feed_refresh")
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to enqueue pending jobs asynchronously: %s", exc)
+
+
+def _auto_generate_show_prompt_async(app: Flask, feed_id: int) -> None:
+    with app.app_context():
+        try:
+            from podcast_processor.show_prompt_generator import (
+                maybe_auto_generate_show_prompt,
+            )
+
+            maybe_auto_generate_show_prompt(feed_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "Failed to auto-generate show prompt for feed %s: %s",
+                feed_id,
+                exc,
+            )
+
+
+@feed_bp.route("/api/feeds/<int:feed_id>/generate-show-prompt", methods=["POST"])
+def generate_show_prompt_endpoint(feed_id: int) -> ResponseReturnValue:
+    _, error_response = require_admin("generate show prompt")
+    if error_response is not None:
+        return error_response
+
+    feed = Feed.query.get_or_404(feed_id)
+    payload = request.get_json(silent=True) or {}
+    force = bool(payload.get("force"))
+
+    existing = (getattr(feed, "custom_llm_ad_prompt", None) or "").strip()
+    if existing and not force:
+        return (
+            jsonify(
+                {
+                    "error": "Show prompt already set. Pass force=true to overwrite.",
+                    "custom_llm_ad_prompt": existing,
+                }
+            ),
+            409,
+        )
+
+    from podcast_processor.show_prompt_generator import (
+        generate_and_persist_show_prompt,
+        llm_is_configured,
+    )
+
+    if not llm_is_configured():
+        return jsonify({"error": "LLM API key is not configured."}), 400
+
+    draft = generate_and_persist_show_prompt(feed_id, force=force)
+    if draft is None:
+        return jsonify({"error": "Failed to generate show prompt."}), 500
+
+    return jsonify({"custom_llm_ad_prompt": draft}), 200
 
 
 @feed_bp.route("/api/feeds/refresh-all", methods=["POST"])

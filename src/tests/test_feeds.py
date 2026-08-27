@@ -685,7 +685,8 @@ def test_add_or_refresh_feed_existing_sets_language_before_refresh(app, mock_fee
 
             result = add_or_refresh_feed(feed.rss_url, language="de")
 
-        assert result.id == feed.id
+        assert result[0].id == feed.id
+        assert result[1] is False
         assert calls == ["update_feed_settings", "refresh_feed"]
 
 

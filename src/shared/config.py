@@ -119,6 +119,13 @@ class Config(BaseModel):
             "results in refined_ad_boundaries (shared Stats + ffmpeg path)."
         ),
     )
+    auto_generate_show_prompt: bool = Field(
+        default=DEFAULTS.AUTO_GENERATE_SHOW_PROMPT,
+        description=(
+            "When a new feed is added, research the show and auto-write "
+            "Feed.custom_llm_ad_prompt for ad classification."
+        ),
+    )
     llm_verify_model: str | None = Field(
         default=DEFAULTS.LLM_VERIFY_MODEL,
         description=(

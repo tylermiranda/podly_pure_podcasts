@@ -280,6 +280,10 @@ export default function AddFeedForm({ onSuccess, onUpgradePlan, planLimitReached
             </option>
           ))}
         </select>
+        <p className="text-xs text-gray-500 mt-2">
+          A show-specific ad prompt is generated automatically after add when an LLM
+          is configured (editable later in Feed Settings).
+        </p>
       </div>
 
       {activeMode === 'url' && (
