@@ -177,11 +177,16 @@ export const feedsApi = {
     return response.data;
   },
 
-  generateShowPrompt: async (
+  generatePromptTag: async (
     feedId: number,
     options: { force?: boolean } = {}
-  ): Promise<{ custom_llm_ad_prompt: string }> => {
-    const response = await api.post(`/api/feeds/${feedId}/generate-show-prompt`, {
+  ): Promise<{
+    tag_id: number;
+    prompt_tag_id: number;
+    name: string;
+    prompt: string | null;
+  }> => {
+    const response = await api.post(`/api/feeds/${feedId}/generate-prompt-tag`, {
       force: options.force ?? false,
     });
     return response.data;

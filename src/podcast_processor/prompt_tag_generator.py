@@ -1,4 +1,4 @@
-"""Research a newly added feed and draft a per-feed show prompt for ad classification."""
+"""Research a newly added feed and create/assign a reusable prompt Tag."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import litellm
 import requests
 
 from app.extensions import db
-from app.models import Feed
+from app.models import Feed, Tag
 from app.runtime_config import config
 from app.writer.client import writer_client
 from podcast_processor.llm_concurrency_limiter import (
@@ -36,18 +36,20 @@ WEBSITE_TEXT_MAX_CHARS = 4_000
 EPISODE_SNIPPET_CHARS = 180
 MAX_RECENT_EPISODES = 8
 GENERATE_MAX_TOKENS = 800
+TAG_NAME_MAX_LEN = 128
 
-GENERATE_SHOW_PROMPT_SYSTEM = (
-    "You write short, durable show-specific rules for podcast ad classification. "
-    "Given research about a podcast (RSS metadata, directory listing, and optionally "
-    "the show website), produce plain text instructions that help an LLM correctly "
-    "label sponsor ads vs content on future episodes of this show. Separate CONTENT "
-    "(do not cut) patterns from AD (cut) patterns when both appear. Call out "
-    "self-promotion (host products, newsletter, Patreon, live shows) as CONTENT "
-    "unless clearly an external sponsor read. Prefer network/host/format quirks "
-    "(pre-roll hosts, midroll bumper language, scripted credits) over generic advice. "
-    "Do not invent sponsors you cannot support from the research. Return only a few "
-    "short sentences or bullets — no preamble."
+GENERATE_PROMPT_TAG_SYSTEM = (
+    "You create reusable podcast ad-detection prompt tags. A prompt tag is a short "
+    "name plus durable instructions shared across shows from the same network, "
+    "production company, or format family (e.g. 'npr', 'wondery', 'noiser'). "
+    "Given research about one podcast plus a list of existing tag names, respond "
+    "with ONLY a JSON object: "
+    '{"name":"<short-slug>","prompt":"<rules>"}. '
+    "Prefer reusing an existing tag name when the show clearly matches that network "
+    "or pattern. Otherwise invent a short lowercase slug (letters, digits, hyphens). "
+    "The prompt must be a few short sentences or bullets separating CONTENT (do not "
+    "cut) from AD (cut) patterns: network bumpers, host-read style, self-promo vs "
+    "external sponsors. Do not invent sponsors. No markdown fences, no preamble."
 )
 
 
@@ -150,7 +152,6 @@ def _safe_request_url(url: str) -> str | None:
     if not is_safe_public_http_url(url):
         return None
     parsed = urlparse(url)
-    # Drop fragment; keep query.
     return urlunparse(
         (parsed.scheme, parsed.netloc, parsed.path or "/", "", parsed.query, "")
     )
@@ -164,7 +165,7 @@ def fetch_directory_match(title: str, rss_url: str) -> dict[str, Any] | None:
         response = requests.get(
             DIRECTORY_SEARCH_URL,
             headers={
-                "User-Agent": "PodlyShowPromptGenerator/1.0 (+https://github.com/podly)"
+                "User-Agent": "PodlyPromptTagGenerator/1.0 (+https://github.com/podly)"
             },
             params={"term": term},
             timeout=10,
@@ -172,7 +173,7 @@ def fetch_directory_match(title: str, rss_url: str) -> dict[str, Any] | None:
         response.raise_for_status()
         payload = response.json()
     except (requests.RequestException, ValueError) as exc:
-        logger.info("show-prompt directory lookup failed for %r: %s", term, exc)
+        logger.info("prompt-tag directory lookup failed for %r: %s", term, exc)
         return None
 
     results = payload.get("results") or []
@@ -188,10 +189,8 @@ def fetch_directory_match(title: str, rss_url: str) -> dict[str, Any] | None:
         if target and _normalize_url_for_match(feed_url) == target:
             best = item
             break
-        if best is None:
-            # Prefer first result with a feed URL as weak fallback.
-            if feed_url:
-                best = item
+        if best is None and feed_url:
+            best = item
     if best is None:
         return None
     return {
@@ -216,17 +215,16 @@ def fetch_website_text(url: str | None) -> str | None:
         with requests.get(
             safe,
             headers={
-                "User-Agent": "PodlyShowPromptGenerator/1.0 (+https://github.com/podly)",
+                "User-Agent": "PodlyPromptTagGenerator/1.0 (+https://github.com/podly)",
                 "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
             },
             timeout=WEBSITE_FETCH_TIMEOUT_SEC,
             stream=True,
             allow_redirects=True,
         ) as response:
-            # Re-validate final URL after redirects.
             if not is_safe_public_http_url(response.url):
                 logger.info(
-                    "show-prompt website fetch blocked unsafe redirect: %s",
+                    "prompt-tag website fetch blocked unsafe redirect: %s",
                     response.url,
                 )
                 return None
@@ -251,7 +249,7 @@ def fetch_website_text(url: str | None) -> str | None:
                 response.encoding or "utf-8", errors="replace"
             )
     except requests.RequestException as exc:
-        logger.info("show-prompt website fetch failed for %s: %s", safe, exc)
+        logger.info("prompt-tag website fetch failed for %s: %s", safe, exc)
         return None
 
     text = _strip_html(raw)
@@ -273,7 +271,7 @@ def load_channel_link_from_rss(rss_url: str) -> str | None:
     try:
         parsed = feedparser.parse(rss_url)
     except Exception as exc:  # noqa: BLE001
-        logger.info("show-prompt RSS reparse failed for %s: %s", rss_url, exc)
+        logger.info("prompt-tag RSS reparse failed for %s: %s", rss_url, exc)
         return None
     feed_meta = getattr(parsed, "feed", None)
     return extract_channel_link(feed_meta)
@@ -304,12 +302,17 @@ def _categories_from_feed(feed: Feed) -> list[str]:
     return out
 
 
+def list_existing_tag_names() -> list[str]:
+    return [str(t.name) for t in Tag.query.order_by(Tag.name.asc()).all() if t.name]
+
+
 def build_research_pack(
     feed: Feed,
     *,
     channel_link: str | None = None,
     directory: dict[str, Any] | None = None,
     website_text: str | None = None,
+    existing_tag_names: list[str] | None = None,
 ) -> dict[str, Any]:
     episodes: list[dict[str, str]] = []
     posts = list(getattr(feed, "posts", None) or [])
@@ -322,11 +325,6 @@ def build_research_pack(
         if title or description:
             episodes.append({"title": title, "description": description})
 
-    tag = getattr(feed, "prompt_tag", None)
-    tag_prompt = None
-    if tag is not None:
-        tag_prompt = (getattr(tag, "prompt", None) or "").strip() or None
-
     pack: dict[str, Any] = {
         "title": (feed.title or "").strip(),
         "author": (feed.author or "").strip(),
@@ -335,7 +333,7 @@ def build_research_pack(
         "rss_url": feed.rss_url,
         "channel_link": channel_link,
         "episodes": episodes,
-        "prompt_tag": tag_prompt,
+        "existing_tag_names": list(existing_tag_names or []),
     }
     if directory:
         pack["directory"] = directory
@@ -369,12 +367,10 @@ def format_research_pack_for_prompt(pack: dict[str, Any]) -> str:
         lines.append(f"Website URL: {pack['channel_link']}")
     if pack.get("website_text"):
         lines.append(f"Website text excerpt: {pack['website_text']}")
-    tag_prompt = pack.get("prompt_tag")
-    if tag_prompt:
-        lines.append(
-            "Existing prompt tag (do not duplicate; add show-specific rules only):\n"
-            f"{tag_prompt}"
-        )
+    existing = pack.get("existing_tag_names") or []
+    if existing:
+        lines.append("Existing prompt tag names (reuse when appropriate):")
+        lines.append(", ".join(str(n) for n in existing))
     episodes = pack.get("episodes") or []
     if episodes:
         lines.append("Recent episodes:")
@@ -384,28 +380,83 @@ def format_research_pack_for_prompt(pack: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def heuristic_show_prompt_draft(pack: dict[str, Any]) -> str:
-    title = pack.get("title") or "This show"
-    author = pack.get("author") or "the hosts"
+def slugify_tag_name(raw: str) -> str:
+    text = (raw or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = text.strip("-")
+    if not text:
+        text = "podcast"
+    return text[:TAG_NAME_MAX_LEN]
+
+
+def heuristic_prompt_tag_draft(pack: dict[str, Any]) -> dict[str, str]:
+    author = (pack.get("author") or "").strip()
+    title = (pack.get("title") or "").strip()
+    existing = {
+        str(n).casefold(): str(n) for n in (pack.get("existing_tag_names") or [])
+    }
+    candidate = slugify_tag_name(author or title or "podcast")
+    # Prefer an existing tag whose name appears in author/title.
+    for key, original in existing.items():
+        hay = f"{author} {title}".casefold()
+        if key and key in hay:
+            candidate = original
+            break
+        if hay and (
+            author.casefold().startswith(key) or title.casefold().startswith(key)
+        ):
+            candidate = original
+            break
+    if candidate.casefold() in existing:
+        candidate = existing[candidate.casefold()]
     categories = pack.get("categories") or []
     genre_hint = ""
     if categories:
         genre_hint = f" Genre/format cues: {', '.join(categories[:4])}."
-    return (
-        f"CONTENT: Treat {author}'s own products, newsletter, live shows, and "
-        f"credits for '{title}' as content, not ads.{genre_hint}\n"
+    prompt = (
+        f"CONTENT: Treat {author or 'the hosts'}' own products, newsletter, live "
+        f"shows, and network/show credits as content, not ads.{genre_hint}\n"
         "AD: Cut external sponsor reads with promo codes, URLs, or 'brought to you by' "
         "language, including pre-roll and midroll host-reads."
     )
+    return {"name": candidate, "prompt": prompt}
 
 
-def draft_show_prompt_with_llm(pack: dict[str, Any]) -> str:
+def _parse_tag_json(raw: str) -> dict[str, str] | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            return None
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(data, dict):
+        return None
+    name = data.get("name")
+    prompt = data.get("prompt")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    if not isinstance(prompt, str) or not prompt.strip():
+        return None
+    return {"name": name.strip(), "prompt": prompt.strip()}
+
+
+def draft_prompt_tag_with_llm(pack: dict[str, Any]) -> dict[str, str]:
     messages = [
-        {"role": "system", "content": GENERATE_SHOW_PROMPT_SYSTEM},
+        {"role": "system", "content": GENERATE_PROMPT_TAG_SYSTEM},
         {
             "role": "user",
             "content": (
-                "Draft show-specific ad classification rules from this research:\n\n"
+                "Create or choose a reusable prompt tag from this research:\n\n"
                 f"{format_research_pack_for_prompt(pack)}"
             ),
         },
@@ -430,14 +481,21 @@ def draft_show_prompt_with_llm(pack: dict[str, Any]) -> str:
     limiter = get_concurrency_limiter(max_concurrent)
     with ConcurrencyContext(limiter, timeout=60.0):
         response = litellm.completion(**completion_args)
-    draft = extract_litellm_content(response).strip()
-    if not draft:
-        draft = heuristic_show_prompt_draft(pack)
+    raw = extract_litellm_content(response).strip()
+    parsed = _parse_tag_json(raw)
+    if parsed is None:
         logger.warning(
-            "show-prompt: model returned empty content for feed %r; using heuristic",
+            "prompt-tag: model returned unparseable content for feed %r; using heuristic",
             pack.get("title"),
         )
-    return draft
+        return heuristic_prompt_tag_draft(pack)
+    parsed["name"] = slugify_tag_name(parsed["name"])
+    # Preserve casing of an exact existing tag name when slug matches.
+    for existing in pack.get("existing_tag_names") or []:
+        if str(existing).casefold() == parsed["name"].casefold():
+            parsed["name"] = str(existing)
+            break
+    return parsed
 
 
 def gather_research_for_feed(feed: Feed) -> dict[str, Any]:
@@ -449,6 +507,7 @@ def gather_research_for_feed(feed: Feed) -> dict[str, Any]:
         channel_link=channel_link,
         directory=directory,
         website_text=website_text,
+        existing_tag_names=list_existing_tag_names(),
     )
 
 
@@ -457,54 +516,105 @@ def llm_is_configured() -> bool:
     return isinstance(key, str) and bool(key.strip())
 
 
-def generate_and_persist_show_prompt(
+def find_tag_by_name(name: str) -> Tag | None:
+    wanted = name.casefold()
+    for tag in Tag.query.all():
+        if str(tag.name or "").casefold() == wanted:
+            return tag
+    return None
+
+
+def _ensure_tag(name: str, prompt: str, *, force_update_prompt: bool) -> Tag | None:
+    existing = find_tag_by_name(name)
+    if existing is not None:
+        if force_update_prompt and (existing.prompt or "").strip() != prompt.strip():
+            result = writer_client.update(
+                "Tag",
+                existing.id,
+                {"prompt": prompt},
+                wait=True,
+            )
+            if result is None or not result.success:
+                logger.error(
+                    "prompt-tag: failed to update tag %s: %s",
+                    existing.id,
+                    getattr(result, "error", None),
+                )
+                return None
+            db.session.expire_all()
+            return db.session.get(Tag, existing.id)
+        return existing
+
+    result = writer_client.create(
+        "Tag",
+        {"name": name, "prompt": prompt},
+        wait=True,
+    )
+    if result is None or not result.success:
+        # Race: another worker created the same name.
+        raced = find_tag_by_name(name)
+        if raced is not None:
+            return raced
+        logger.error(
+            "prompt-tag: failed to create tag %r: %s",
+            name,
+            getattr(result, "error", None),
+        )
+        return None
+    tag_id = (result.data or {}).get("id")
+    db.session.expire_all()
+    if tag_id is None:
+        return find_tag_by_name(name)
+    return db.session.get(Tag, tag_id)
+
+
+def generate_and_persist_prompt_tag(
     feed_id: int,
     *,
     force: bool = False,
-) -> str | None:
-    """Research + LLM draft; persist to Feed.custom_llm_ad_prompt.
+) -> dict[str, Any] | None:
+    """Research + LLM draft; create/reuse Tag and assign Feed.prompt_tag_id.
 
-    Returns the draft when persisted (or when force overwrote). Returns None when
-    skipped (already set without force, missing LLM, etc.).
+    Returns ``{tag_id, name, prompt}`` when assigned. None when skipped.
     """
     feed = db.session.get(Feed, feed_id)
     if feed is None:
-        logger.warning("show-prompt: feed %s not found", feed_id)
+        logger.warning("prompt-tag: feed %s not found", feed_id)
         return None
 
-    existing = (getattr(feed, "custom_llm_ad_prompt", None) or "").strip()
-    if existing and not force:
-        logger.info(
-            "show-prompt: skipping feed %s — custom prompt already set", feed_id
-        )
+    if getattr(feed, "prompt_tag_id", None) is not None and not force:
+        logger.info("prompt-tag: skipping feed %s — prompt_tag_id already set", feed_id)
         return None
 
     if not llm_is_configured():
         logger.info(
-            "show-prompt: skipping feed %s — LLM API key not configured", feed_id
+            "prompt-tag: skipping feed %s — LLM API key not configured", feed_id
         )
         return None
 
     pack = gather_research_for_feed(feed)
     try:
-        draft = draft_show_prompt_with_llm(pack)
+        draft = draft_prompt_tag_with_llm(pack)
     except Exception as exc:  # noqa: BLE001
-        logger.error("show-prompt: LLM draft failed for feed %s: %s", feed_id, exc)
-        draft = heuristic_show_prompt_draft(pack)
+        logger.error("prompt-tag: LLM draft failed for feed %s: %s", feed_id, exc)
+        draft = heuristic_prompt_tag_draft(pack)
 
-    draft = draft.strip()
-    if not draft:
+    name = slugify_tag_name(draft["name"])
+    prompt = draft["prompt"].strip()
+    if not name or not prompt:
         return None
 
-    # Re-check emptiness unless forcing, to avoid racing a manual edit.
+    tag = _ensure_tag(name, prompt, force_update_prompt=force)
+    if tag is None:
+        return None
+
     db.session.expire(feed)
     feed = db.session.get(Feed, feed_id)
     if feed is None:
         return None
-    current = (getattr(feed, "custom_llm_ad_prompt", None) or "").strip()
-    if current and not force:
+    if getattr(feed, "prompt_tag_id", None) is not None and not force:
         logger.info(
-            "show-prompt: aborting write for feed %s — prompt set concurrently",
+            "prompt-tag: aborting assign for feed %s — tag set concurrently",
             feed_id,
         )
         return None
@@ -512,28 +622,36 @@ def generate_and_persist_show_prompt(
     result = writer_client.update(
         "Feed",
         feed_id,
-        {"custom_llm_ad_prompt": draft},
+        {"prompt_tag_id": tag.id},
         wait=True,
     )
     if result is None or not result.success:
         logger.error(
-            "show-prompt: failed to persist prompt for feed %s: %s",
+            "prompt-tag: failed to assign tag %s to feed %s: %s",
+            tag.id,
             feed_id,
             getattr(result, "error", None),
         )
         return None
 
     db.session.expire_all()
-    logger.info("show-prompt: wrote custom prompt for feed %s", feed_id)
-    return draft
+    logger.info(
+        "prompt-tag: assigned tag %s (%r) to feed %s", tag.id, tag.name, feed_id
+    )
+    return {
+        "tag_id": tag.id,
+        "name": tag.name,
+        "prompt": tag.prompt,
+        "prompt_tag_id": tag.id,
+    }
 
 
-def maybe_auto_generate_show_prompt(feed_id: int) -> None:
+def maybe_auto_generate_prompt_tag(feed_id: int) -> None:
     """Entry point for post-add async hook."""
-    if not bool(getattr(config, "auto_generate_show_prompt", True)):
-        logger.info("show-prompt: auto-generate disabled; skipping feed %s", feed_id)
+    if not bool(getattr(config, "auto_generate_prompt_tag", True)):
+        logger.info("prompt-tag: auto-generate disabled; skipping feed %s", feed_id)
         return
     try:
-        generate_and_persist_show_prompt(feed_id, force=False)
+        generate_and_persist_prompt_tag(feed_id, force=False)
     except Exception as exc:  # noqa: BLE001
-        logger.error("show-prompt: auto-generate failed for feed %s: %s", feed_id, exc)
+        logger.error("prompt-tag: auto-generate failed for feed %s: %s", feed_id, exc)

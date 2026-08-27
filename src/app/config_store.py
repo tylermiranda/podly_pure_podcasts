@@ -108,7 +108,7 @@ def ensure_defaults() -> None:
             "enable_word_level_boundary_refinder": DEFAULTS.ENABLE_WORD_LEVEL_BOUNDARY_REFINDER,
             "enable_llm_chapter_fallback_tagging": DEFAULTS.ENABLE_LLM_CHAPTER_FALLBACK_TAGGING,
             "enable_ad_verify": DEFAULTS.ENABLE_AD_VERIFY,
-            "auto_generate_show_prompt": DEFAULTS.AUTO_GENERATE_SHOW_PROMPT,
+            "auto_generate_prompt_tag": DEFAULTS.AUTO_GENERATE_PROMPT_TAG,
             "llm_verify_model": DEFAULTS.LLM_VERIFY_MODEL,
             "llm_boundary_refine_model": DEFAULTS.LLM_BOUNDARY_REFINE_MODEL,
             "enable_two_stage_classify": DEFAULTS.ENABLE_TWO_STAGE_CLASSIFY,
@@ -231,8 +231,8 @@ def read_combined() -> dict[str, Any]:
             "enable_ad_verify": getattr(
                 llm, "enable_ad_verify", DEFAULTS.ENABLE_AD_VERIFY
             ),
-            "auto_generate_show_prompt": getattr(
-                llm, "auto_generate_show_prompt", DEFAULTS.AUTO_GENERATE_SHOW_PROMPT
+            "auto_generate_prompt_tag": getattr(
+                llm, "auto_generate_prompt_tag", DEFAULTS.AUTO_GENERATE_PROMPT_TAG
             ),
             "llm_verify_model": getattr(llm, "llm_verify_model", None),
             "llm_boundary_refine_model": getattr(
@@ -330,7 +330,7 @@ def _update_section_llm(data: dict[str, Any]) -> None:
         "enable_word_level_boundary_refinder",
         "enable_llm_chapter_fallback_tagging",
         "enable_ad_verify",
-        "auto_generate_show_prompt",
+        "auto_generate_prompt_tag",
         "llm_verify_model",
         "llm_boundary_refine_model",
         "enable_two_stage_classify",
@@ -631,9 +631,9 @@ def to_pydantic_config() -> PydanticConfig:
         enable_ad_verify=bool(
             data["llm"].get("enable_ad_verify", DEFAULTS.ENABLE_AD_VERIFY)
         ),
-        auto_generate_show_prompt=bool(
+        auto_generate_prompt_tag=bool(
             data["llm"].get(
-                "auto_generate_show_prompt", DEFAULTS.AUTO_GENERATE_SHOW_PROMPT
+                "auto_generate_prompt_tag", DEFAULTS.AUTO_GENERATE_PROMPT_TAG
             )
         ),
         llm_verify_model=data["llm"].get("llm_verify_model")

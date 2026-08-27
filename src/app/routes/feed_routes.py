@@ -266,10 +266,10 @@ def add_feed() -> ResponseReturnValue:  # noqa: PLR0912
         ).start()
         if created:
             Thread(
-                target=_auto_generate_show_prompt_async,
+                target=_auto_generate_prompt_tag_async,
                 args=(app, feed.id),
                 daemon=True,
-                name=f"show-prompt-gen-{feed.id}",
+                name=f"prompt-tag-gen-{feed.id}",
             ).start()
         return redirect(url_for("main.index"))
     except Exception as e:  # noqa: BLE001
@@ -885,25 +885,25 @@ def _enqueue_pending_jobs_async(app: Flask) -> None:
             logger.error("Failed to enqueue pending jobs asynchronously: %s", exc)
 
 
-def _auto_generate_show_prompt_async(app: Flask, feed_id: int) -> None:
+def _auto_generate_prompt_tag_async(app: Flask, feed_id: int) -> None:
     with app.app_context():
         try:
-            from podcast_processor.show_prompt_generator import (
-                maybe_auto_generate_show_prompt,
+            from podcast_processor.prompt_tag_generator import (
+                maybe_auto_generate_prompt_tag,
             )
 
-            maybe_auto_generate_show_prompt(feed_id)
+            maybe_auto_generate_prompt_tag(feed_id)
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                "Failed to auto-generate show prompt for feed %s: %s",
+                "Failed to auto-generate prompt tag for feed %s: %s",
                 feed_id,
                 exc,
             )
 
 
-@feed_bp.route("/api/feeds/<int:feed_id>/generate-show-prompt", methods=["POST"])
-def generate_show_prompt_endpoint(feed_id: int) -> ResponseReturnValue:
-    _, error_response = require_admin("generate show prompt")
+@feed_bp.route("/api/feeds/<int:feed_id>/generate-prompt-tag", methods=["POST"])
+def generate_prompt_tag_endpoint(feed_id: int) -> ResponseReturnValue:
+    _, error_response = require_admin("generate prompt tag")
     if error_response is not None:
         return error_response
 
@@ -911,31 +911,33 @@ def generate_show_prompt_endpoint(feed_id: int) -> ResponseReturnValue:
     payload = request.get_json(silent=True) or {}
     force = bool(payload.get("force"))
 
-    existing = (getattr(feed, "custom_llm_ad_prompt", None) or "").strip()
-    if existing and not force:
+    if getattr(feed, "prompt_tag_id", None) is not None and not force:
+        tag = getattr(feed, "prompt_tag", None)
         return (
             jsonify(
                 {
-                    "error": "Show prompt already set. Pass force=true to overwrite.",
-                    "custom_llm_ad_prompt": existing,
+                    "error": "Prompt tag already assigned. Pass force=true to overwrite.",
+                    "prompt_tag_id": feed.prompt_tag_id,
+                    "name": getattr(tag, "name", None),
+                    "prompt": getattr(tag, "prompt", None),
                 }
             ),
             409,
         )
 
-    from podcast_processor.show_prompt_generator import (
-        generate_and_persist_show_prompt,
+    from podcast_processor.prompt_tag_generator import (
+        generate_and_persist_prompt_tag,
         llm_is_configured,
     )
 
     if not llm_is_configured():
         return jsonify({"error": "LLM API key is not configured."}), 400
 
-    draft = generate_and_persist_show_prompt(feed_id, force=force)
-    if draft is None:
-        return jsonify({"error": "Failed to generate show prompt."}), 500
+    result = generate_and_persist_prompt_tag(feed_id, force=force)
+    if result is None:
+        return jsonify({"error": "Failed to generate prompt tag."}), 500
 
-    return jsonify({"custom_llm_ad_prompt": draft}), 200
+    return jsonify(result), 200
 
 
 @feed_bp.route("/api/feeds/refresh-all", methods=["POST"])

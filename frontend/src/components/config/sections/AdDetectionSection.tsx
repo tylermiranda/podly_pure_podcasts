@@ -85,14 +85,14 @@ export default function AdDetectionSection() {
           />
         </Field>
         <Field
-          label="Auto-generate show prompt on add"
-          hint="When a new podcast is added, research RSS/directory/website and write Custom Ad Detection Instructions automatically."
+          label="Auto-generate prompt tag on add"
+          hint="When a new podcast is added, research RSS/directory/website and create or reuse a prompt tag, then assign it to the feed."
         >
           <input
             type="checkbox"
-            checked={llm?.auto_generate_show_prompt ?? true}
+            checked={llm?.auto_generate_prompt_tag ?? true}
             onChange={(e) =>
-              setField(['llm', 'auto_generate_show_prompt'], e.target.checked)
+              setField(['llm', 'auto_generate_prompt_tag'], e.target.checked)
             }
           />
         </Field>

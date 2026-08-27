@@ -596,10 +596,10 @@ class LLMSettings(db.Model):  # type: ignore[name-defined, misc]
         nullable=False,
         default=DEFAULTS.ENABLE_AD_VERIFY,
     )
-    auto_generate_show_prompt = db.Column(
+    auto_generate_prompt_tag = db.Column(
         db.Boolean,
         nullable=False,
-        default=DEFAULTS.AUTO_GENERATE_SHOW_PROMPT,
+        default=DEFAULTS.AUTO_GENERATE_PROMPT_TAG,
     )
     llm_verify_model = db.Column(db.Text, nullable=True)
     llm_boundary_refine_model = db.Column(db.Text, nullable=True)
