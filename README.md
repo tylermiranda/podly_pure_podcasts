@@ -37,7 +37,7 @@ ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
 | **Cut defaults** | New installs / reset defaults: `fade_ms=0` (was 3000), `min_ad_segment_length_seconds=5` (was 14), `min_confidence=0.7` (was 0.8). Existing DB values are unchanged until you update Output settings. |
 | **Client poll freshness** | Feed list shows `Last fetched … via {client}` from the podcast app User-Agent that last requested the Podly RSS URL. |
 | **Upstream freshness** | `last_fetched_at` (Podly → publisher RSS) is shown on the feed detail pane as `Upstream RSS refreshed …`. |
-| **Transcript corrections** | Fullscreen **Transcript Segments** workspace: mark ad/content spans, then **Improve show prompt and recut audio** (analyze → append feed prompt → recut) or **Recut audio only**. |
+| **Transcript corrections** | Fullscreen **Transcript Segments** workspace: mark ad/content spans, then **Improve show prompt and recut audio** (analyze → append feed prompt → recut) or **Recut audio only**. Completion shows a blurred Done modal, desktop notification, tab-title blink, and a short chime. |
 
 **Why the cut defaults matter:** a 3s fade leaves audible ad bleed at every cut; a 14s minimum length drops short prerolls. Prefer `fade_ms=0` and a lower length threshold when ads still play after processing. For host-read / network-specific patterns (e.g. Wondery / Noiser), assign a prompt tag or set a custom prompt on that feed and reprocess.
 
@@ -58,6 +58,21 @@ Open an episode’s **Transcript** button (or Stats → **Transcript Segments**)
 <img width="100%" src="docs/images/screenshot-transcript-corrections.png" alt="Mark ad/content controls with Improve show prompt and recut audio and Recut audio only" />
 
 <p align="center"><em>Mark ad / Mark content, optional jingle template, then improve the show prompt and recut (or recut only).</em></p>
+
+When **Improve show prompt and recut audio** finishes, Podly alerts you so a long run is hard to miss:
+
+- Blurred full-page **Done** modal (Dismiss, Escape, or click outside)
+- Desktop notification (browser permission on first click)
+- Blinking tab title until you focus the tab or dismiss
+- Short completion chime
+
+<img width="70%" src="docs/images/screenshot-prompt-recut-done-modal.png" alt="Done modal over blurred Transcript workspace after improve prompt and recut" />
+
+<p align="center"><em>Completion modal over a blurred Transcript workspace.</em></p>
+
+<img width="40%" src="docs/images/screenshot-prompt-recut-notification.png" alt="Desktop notification: Done prompt + recut" />
+
+<p align="center"><em>Desktop notification when the improve + recut job completes.</em></p>
 
 You do **not** need **Reprocess** (Whisper/LLM) for these fixes. Effective cuts show in red. For repeating full ad reads, prefer corrections + feed prompt; use **Save as jingle template** for short intro/outro stingers (check Stats → Ad Detection Signals for jingle hits after a later reprocess).
 

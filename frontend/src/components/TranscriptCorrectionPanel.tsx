@@ -1,8 +1,14 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { feedsApi } from '../services/api';
 import { useAudioPlayer } from '../contexts/AudioPlayerContext';
+import {
+  ensureNotificationPermission,
+  startCompletionAlert,
+  unlockCompletionAudio,
+  type CompletionAlertController,
+} from '../utils/completionAlert';
 import { getHttpErrorInfo } from '../utils/httpError';
 import type { SuggestedPromptStatus } from '../types';
 
@@ -172,12 +178,14 @@ export default function TranscriptCorrectionPanel({
   const queryClient = useQueryClient();
   const { audioRef: globalAudioRef, reloadProcessedAudio } = useAudioPlayer();
   const originalAudioRef = useRef<HTMLAudioElement>(null);
+  const completionAlertRef = useRef<CompletionAlertController | null>(null);
   const [selectedIndexes, setSelectedIndexes] = useState<Set<number>>(() => new Set());
   const [rangeAnchor, setRangeAnchor] = useState<number | null>(null);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [completionMessage, setCompletionMessage] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
   const selectionGroups = useMemo(
@@ -248,6 +256,35 @@ export default function TranscriptCorrectionPanel({
     setSelectedIndexes(new Set());
     setRangeAnchor(null);
   }, []);
+
+  const dismissCompletionAlert = useCallback(() => {
+    completionAlertRef.current?.stop();
+    completionAlertRef.current = null;
+    setCompletionMessage(null);
+  }, []);
+
+  useEffect(() => {
+    const onFocus = () => {
+      completionAlertRef.current?.stopBlink();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      completionAlertRef.current?.stop();
+      completionAlertRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!completionMessage) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        dismissCompletionAlert();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [completionMessage, dismissCompletionAlert]);
 
   const refreshStatsOnly = async () => {
     await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
@@ -401,12 +438,20 @@ export default function TranscriptCorrectionPanel({
     },
     onSuccess: async (result) => {
       setError(null);
-      setStatus('Show prompt updated and processed audio recut.');
-      if (result.promptResult === 'already_present') {
-        toast.success('Prompt already up to date — processed audio updated');
-      } else {
-        toast.success('Show prompt improved and audio recut');
-      }
+      setStatus(null);
+      const message =
+        result.promptResult === 'already_present'
+          ? 'Prompt already up to date — processed audio updated.'
+          : 'Show prompt updated and processed audio recut.';
+      setCompletionMessage(message);
+      completionAlertRef.current?.stop();
+      completionAlertRef.current = startCompletionAlert({
+        title: 'Podly',
+        body: message,
+        blinkTitle: 'Done: prompt + recut',
+        tag: 'podly-improve-recut',
+      });
+      toast.success(message, { duration: 6000 });
       await refreshAfterRecut();
     },
     onError: (err: unknown) => {
@@ -570,8 +615,14 @@ export default function TranscriptCorrectionPanel({
                 <button
                   type="button"
                   onClick={() => {
-                    setError(null);
-                    improveAndRecutMutation.mutate();
+                    void (async () => {
+                      setError(null);
+                      await Promise.all([
+                        ensureNotificationPermission(),
+                        unlockCompletionAudio(),
+                      ]);
+                      improveAndRecutMutation.mutate();
+                    })();
                   }}
                   disabled={actionsBusy}
                   className="rounded bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-50"
@@ -770,6 +821,41 @@ export default function TranscriptCorrectionPanel({
           </div>
         )}
       </div>
+
+      {completionMessage && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-md"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="improve-recut-done-title"
+          onClick={dismissCompletionAlert}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-emerald-200 bg-white p-6 shadow-2xl dark:border-emerald-700 dark:bg-slate-900"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p
+              id="improve-recut-done-title"
+              className="text-left text-lg font-semibold text-emerald-900 dark:text-emerald-100"
+            >
+              Done
+            </p>
+            <p className="mt-2 text-left text-sm text-slate-700 dark:text-slate-200">
+              {completionMessage}
+            </p>
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                autoFocus
+                onClick={dismissCompletionAlert}
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
