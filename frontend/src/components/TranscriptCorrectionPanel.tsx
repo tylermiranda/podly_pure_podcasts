@@ -6,6 +6,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import {
   ensureNotificationPermission,
   startCompletionAlert,
+  unlockCompletionAudio,
   type CompletionAlertController,
 } from '../utils/completionAlert';
 import { getHttpErrorInfo } from '../utils/httpError';
@@ -605,7 +606,10 @@ export default function TranscriptCorrectionPanel({
                   onClick={() => {
                     void (async () => {
                       setError(null);
-                      await ensureNotificationPermission();
+                      await Promise.all([
+                        ensureNotificationPermission(),
+                        unlockCompletionAudio(),
+                      ]);
                       improveAndRecutMutation.mutate();
                     })();
                   }}
