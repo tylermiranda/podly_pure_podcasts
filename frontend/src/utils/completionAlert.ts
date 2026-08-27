@@ -6,6 +6,7 @@ export type CompletionAlertOptions = {
   tag?: string;
   /** Play a short Web Audio chime (default true). */
   playSound?: boolean;
+  icon?: string;
 };
 
 export type CompletionAlertController = {
@@ -14,6 +15,9 @@ export type CompletionAlertController = {
 };
 
 const BLINK_MS = 1000;
+
+/** Survives TranscriptCorrectionPanel remounts during stats refetch. */
+let activeAlert: CompletionAlertController | null = null;
 
 export async function ensureNotificationPermission(): Promise<NotificationPermission | 'unsupported'> {
   if (typeof window === 'undefined' || typeof Notification === 'undefined') {
@@ -83,11 +87,61 @@ function playCompletionChime(): void {
   }
 }
 
+function defaultNotificationIcon(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    return new URL('/images/logos/logo.webp', window.location.origin).href;
+  } catch {
+    return undefined;
+  }
+}
+
+function showDesktopNotification(
+  options: CompletionAlertOptions
+): Notification | null {
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+    return null;
+  }
+  if (Notification.permission !== 'granted') {
+    return null;
+  }
+
+  const icon = options.icon ?? defaultNotificationIcon();
+  try {
+    const notification = new Notification(options.title, {
+      body: options.body,
+      tag: options.tag ?? 'podly-improve-recut',
+      // Helps on some platforms; macOS may still use System Settings alert style.
+      requireInteraction: true,
+      silent: false,
+      ...(icon ? { icon } : {}),
+    });
+    notification.onclick = () => {
+      try {
+        window.focus();
+      } catch {
+        // ignore
+      }
+      notification.close();
+    };
+    return notification;
+  } catch {
+    return null;
+  }
+}
+
+export function stopActiveCompletionAlert(): void {
+  activeAlert?.stop();
+  activeAlert = null;
+}
+
 export function startCompletionAlert(
   options: CompletionAlertOptions
 ): CompletionAlertController {
+  // Replace any prior alert (e.g. remount / double fire).
+  stopActiveCompletionAlert();
+
   const blinkTitle = options.blinkTitle ?? 'Done: prompt + recut';
-  const tag = options.tag ?? 'podly-improve-recut';
   const originalTitle =
     typeof document !== 'undefined' ? document.title : '';
   let intervalId: ReturnType<typeof setInterval> | null = null;
@@ -118,24 +172,16 @@ export function startCompletionAlert(
       }
       notification = null;
     }
+    if (activeAlert === controller) {
+      activeAlert = null;
+    }
   };
 
   if (options.playSound !== false) {
     playCompletionChime();
   }
 
-  if (typeof window !== 'undefined' && typeof Notification !== 'undefined') {
-    if (Notification.permission === 'granted') {
-      try {
-        notification = new Notification(options.title, {
-          body: options.body,
-          tag,
-        });
-      } catch {
-        notification = null;
-      }
-    }
-  }
+  notification = showDesktopNotification(options);
 
   if (typeof document !== 'undefined') {
     intervalId = setInterval(() => {
@@ -144,5 +190,7 @@ export function startCompletionAlert(
     }, BLINK_MS);
   }
 
-  return { stopBlink, stop };
+  const controller: CompletionAlertController = { stopBlink, stop };
+  activeAlert = controller;
+  return controller;
 }

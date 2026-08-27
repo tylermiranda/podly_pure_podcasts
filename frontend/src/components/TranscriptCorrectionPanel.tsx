@@ -6,6 +6,7 @@ import { useAudioPlayer } from '../contexts/AudioPlayerContext';
 import {
   ensureNotificationPermission,
   startCompletionAlert,
+  stopActiveCompletionAlert,
   unlockCompletionAudio,
   type CompletionAlertController,
 } from '../utils/completionAlert';
@@ -258,7 +259,7 @@ export default function TranscriptCorrectionPanel({
   }, []);
 
   const dismissCompletionAlert = useCallback(() => {
-    completionAlertRef.current?.stop();
+    stopActiveCompletionAlert();
     completionAlertRef.current = null;
     setCompletionMessage(null);
   }, []);
@@ -270,8 +271,8 @@ export default function TranscriptCorrectionPanel({
     window.addEventListener('focus', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
-      completionAlertRef.current?.stop();
-      completionAlertRef.current = null;
+      // Do not stop the desktop notification on unmount — stats refetch can remount
+      // this panel and would otherwise close the OS banner before it is seen.
     };
   }, []);
 
@@ -443,16 +444,16 @@ export default function TranscriptCorrectionPanel({
         result.promptResult === 'already_present'
           ? 'Prompt already up to date — processed audio updated.'
           : 'Show prompt updated and processed audio recut.';
+      // Refresh first so a panel remount cannot close the OS notification.
+      await refreshAfterRecut();
       setCompletionMessage(message);
-      completionAlertRef.current?.stop();
       completionAlertRef.current = startCompletionAlert({
-        title: 'Podly',
+        title: 'Podly — done',
         body: message,
         blinkTitle: 'Done: prompt + recut',
         tag: 'podly-improve-recut',
       });
       toast.success(message, { duration: 6000 });
-      await refreshAfterRecut();
     },
     onError: (err: unknown) => {
       setStatus(null);
@@ -842,6 +843,11 @@ export default function TranscriptCorrectionPanel({
             </p>
             <p className="mt-2 text-left text-sm text-slate-700 dark:text-slate-200">
               {completionMessage}
+            </p>
+            <p className="mt-2 text-left text-xs text-slate-500 dark:text-slate-400">
+              If you allowed notifications but did not see a banner, check macOS Notification
+              Center — Chrome often hides banners while this tab is focused. Also confirm System
+              Settings → Notifications → Google Chrome (or Safari) allows alerts.
             </p>
             <div className="mt-6 flex justify-end">
               <button
