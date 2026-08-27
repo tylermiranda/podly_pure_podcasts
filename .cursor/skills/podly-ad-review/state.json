@@ -166,6 +166,11 @@
       "pass": true,
       "ad_pct": 10.1,
       "checked_at": "2026-08-26T18:14:59.919901Z"
+    },
+    "d6b5b9b2-da9a-5d3e-b9ef-4e1d8e529b5d": {
+      "pass": true,
+      "ad_pct": 24.1,
+      "checked_at": "2026-08-27T10:15:18.257095Z"
     }
   },
   "failures": {
@@ -1077,9 +1082,19 @@
       "ad_pct": 10.1,
       "failures": [],
       "warnings": []
+    },
+    {
+      "ts": "2026-08-27T10:15:18.257075Z",
+      "guid": "d6b5b9b2-da9a-5d3e-b9ef-4e1d8e529b5d",
+      "feed_id": 1,
+      "feed_title": "History of the 90s",
+      "pass": true,
+      "ad_pct": 24.1,
+      "failures": [],
+      "warnings": []
     }
   ],
   "local_num_segments_per_prompt": 24,
-  "last_run_at": "2026-08-26T18:14:59.922193Z",
+  "last_run_at": "2026-08-27T10:15:18.259266Z",
   "notes": "DeepSeek Flash reprocess 2026-08-12 (refiners off, segments=60, content_guard hot-patched). PM 14.7% band-fail + unlabeled interview FPs ~1180-1299s. H90 0% \u2014 ModelCall 953 failed_permanent empty response. E80 12.1% mixed bleeds still in labels (Grow disclaimer + cold-open; Jerry.ai + cold-open)."
 }
