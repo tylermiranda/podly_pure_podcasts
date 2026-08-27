@@ -37,8 +37,29 @@ ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
 | **Cut defaults** | New installs / reset defaults: `fade_ms=0` (was 3000), `min_ad_segment_length_seconds=5` (was 14), `min_confidence=0.7` (was 0.8). Existing DB values are unchanged until you update Output settings. |
 | **Client poll freshness** | Feed list shows `Last fetched … via {client}` from the podcast app User-Agent that last requested the Podly RSS URL. |
 | **Upstream freshness** | `last_fetched_at` (Podly → publisher RSS) is shown on the feed detail pane as `Upstream RSS refreshed …`. |
+| **Transcript corrections** | Fullscreen **Transcript Segments** workspace: mark ad/content spans, then **Improve show prompt and recut audio** (analyze → append feed prompt → recut) or **Recut audio only**. |
 
 **Why the cut defaults matter:** a 3s fade leaves audible ad bleed at every cut; a 14s minimum length drops short prerolls. Prefer `fade_ms=0` and a lower length threshold when ads still play after processing. For host-read / network-specific patterns (e.g. Wondery / Noiser), assign a prompt tag or set a custom prompt on that feed and reprocess.
+
+### Transcript corrections workspace
+
+Open an episode’s **Transcript** button (or Stats → **Transcript Segments**). The modal uses the full viewport so you can listen to original audio, select ranges, and fix cuts without cramped scrolling.
+
+<img width="100%" src="docs/images/screenshot-transcript-workspace.png" alt="Fullscreen Transcript Segments modal with original audio, mark controls, and segment table" />
+
+<p align="center"><em>Fullscreen Stats modal on the Transcript Segments tab — original audio player, segment table, and correction controls.</em></p>
+
+**Workflow**
+
+1. Click a row to play from that segment; check boxes (Shift+click for a range) or set Start/End seconds.
+2. **Mark ad** or **Mark content** to save corrections (does not change the processed MP3 yet).
+3. When finished marking, click **Improve show prompt and recut audio** to analyze corrections, append a show-prompt draft to the feed, and recut the processed MP3 in one step — or **Recut audio only** if you only want cuts updated.
+
+<img width="100%" src="docs/images/screenshot-transcript-corrections.png" alt="Mark ad/content controls with Improve show prompt and recut audio and Recut audio only" />
+
+<p align="center"><em>Mark ad / Mark content, optional jingle template, then improve the show prompt and recut (or recut only).</em></p>
+
+You do **not** need **Reprocess** (Whisper/LLM) for these fixes. Effective cuts show in red. For repeating full ad reads, prefer corrections + feed prompt; use **Save as jingle template** for short intro/outro stingers (check Stats → Ad Detection Signals for jingle hits after a later reprocess).
 
 ### Prompt tags (examples)
 
