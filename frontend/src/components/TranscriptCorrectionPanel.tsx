@@ -136,6 +136,27 @@ function snapToWords(
   return { start: snappedStart, end: snappedEnd };
 }
 
+async function appendPromptSnippet(
+  feedId: number,
+  snippet: string,
+  existingPrompt: string | null | undefined
+): Promise<'appended' | 'already_present'> {
+  const trimmed = snippet.trim();
+  if (!trimmed) {
+    throw new Error('Model returned an empty prompt draft');
+  }
+  const existing = existingPrompt?.trim() || '';
+  if (existing && existing.includes(trimmed)) {
+    await feedsApi.updateFeedSettings(feedId, {
+      custom_llm_ad_prompt: existing,
+    });
+    return 'already_present';
+  }
+  const next = existing ? `${existing}\n\n${trimmed}` : trimmed;
+  await feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
+  return 'appended';
+}
+
 export default function TranscriptCorrectionPanel({
   episodeGuid,
   feedId,
@@ -155,15 +176,9 @@ export default function TranscriptCorrectionPanel({
   const [rangeAnchor, setRangeAnchor] = useState<number | null>(null);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [kind, setKind] = useState<CorrectionKind>('missed_ad');
-  const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [learnedDraft, setLearnedDraft] = useState<string | null>(null);
-  const [learnedExistingPrompt, setLearnedExistingPrompt] = useState<string | null>(
-    null
-  );
 
   const selectionGroups = useMemo(
     () => contiguousIndexGroups(selectedIndexes, segments),
@@ -274,7 +289,6 @@ export default function TranscriptCorrectionPanel({
               start_time: snapped.start,
               end_time: snapped.end,
               segment_ids: rows.map((segment) => segment.id),
-              reason: reason.trim() || undefined,
               apply: false,
             });
           })
@@ -292,7 +306,6 @@ export default function TranscriptCorrectionPanel({
         kind: correctionKind,
         start_time: start,
         end_time: end,
-        reason: reason.trim() || undefined,
         apply: false,
       });
       return { count: 1 };
@@ -302,7 +315,7 @@ export default function TranscriptCorrectionPanel({
       const count = result.count;
       setError(null);
       setStatus(
-        `${count} correction${count === 1 ? '' : 's'} saved — recut when you are done marking spans.`
+        `${count} correction${count === 1 ? '' : 's'} saved — improve the show prompt and recut when finished marking.`
       );
       toast.success(`Saved ${count} correction${count === 1 ? '' : 's'}`);
       await refreshStatsOnly();
@@ -368,20 +381,45 @@ export default function TranscriptCorrectionPanel({
     },
   });
 
+  const improveAndRecutMutation = useMutation({
+    mutationFn: async () => {
+      setStatus('Analyzing corrections for show prompt…');
+      const analysis = await feedsApi.analyzeAdCorrectionsPrompt(episodeGuid);
+      const draft = (analysis.draft || '').trim();
+      if (!draft) {
+        throw new Error('Model returned an empty prompt draft');
+      }
+      setStatus('Appending improved show prompt…');
+      const promptResult = await appendPromptSnippet(
+        feedId,
+        draft,
+        analysis.existing_prompt ?? existingPrompt
+      );
+      setStatus('Recutting processed audio…');
+      await feedsApi.applyAdCorrections(episodeGuid);
+      return { promptResult };
+    },
+    onSuccess: async (result) => {
+      setError(null);
+      setStatus('Show prompt updated and processed audio recut.');
+      if (result.promptResult === 'already_present') {
+        toast.success('Prompt already up to date — processed audio updated');
+      } else {
+        toast.success('Show prompt improved and audio recut');
+      }
+      await refreshAfterRecut();
+    },
+    onError: (err: unknown) => {
+      setStatus(null);
+      setError(getHttpErrorInfo(err).message);
+    },
+  });
+
   const acceptSnippetMutation = useMutation({
-    mutationFn: async (existingPrompt: string | null) => {
+    mutationFn: async (currentPrompt: string | null) => {
       const snippet = suggestedPrompt?.snippet;
       if (!snippet) return;
-      const existing = existingPrompt?.trim() || '';
-      if (existing && existing.includes(snippet.trim())) {
-        return feedsApi.updateFeedSettings(feedId, {
-          custom_llm_ad_prompt: existing,
-        });
-      }
-      const next = existing
-        ? `${existing}\n\n${snippet}`
-        : snippet;
-      return feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
+      await appendPromptSnippet(feedId, snippet, currentPrompt);
     },
     onSuccess: async () => {
       toast.success('Feed prompt updated');
@@ -393,53 +431,11 @@ export default function TranscriptCorrectionPanel({
     },
   });
 
-  const analyzePromptMutation = useMutation({
-    mutationFn: () => feedsApi.analyzeAdCorrectionsPrompt(episodeGuid),
-    onSuccess: (data) => {
-      setError(null);
-      const draft = (data.draft || '').trim();
-      if (!draft) {
-        setLearnedDraft(null);
-        setError('Model returned an empty prompt draft');
-        return;
-      }
-      setLearnedDraft(data.draft);
-      setLearnedExistingPrompt(data.existing_prompt);
-      setStatus(null);
-      toast.success('Draft show prompt ready — review before appending');
-    },
-    onError: (err: unknown) => {
-      setStatus(null);
-      setError(getHttpErrorInfo(err).message);
-    },
-  });
-
-  const acceptLearnedDraftMutation = useMutation({
-    mutationFn: async () => {
-      const snippet = learnedDraft?.trim();
-      if (!snippet) return;
-      const existing =
-        (learnedExistingPrompt ?? existingPrompt)?.trim() || '';
-      if (existing && existing.includes(snippet)) {
-        toast.success('Draft already present in show prompt');
-        return feedsApi.updateFeedSettings(feedId, {
-          custom_llm_ad_prompt: existing,
-        });
-      }
-      const next = existing ? `${existing}\n\n${snippet}` : snippet;
-      return feedsApi.updateFeedSettings(feedId, { custom_llm_ad_prompt: next });
-    },
-    onSuccess: async () => {
-      toast.success('Feed prompt updated — Recut if cuts should change');
-      setLearnedDraft(null);
-      setLearnedExistingPrompt(null);
-      await queryClient.invalidateQueries({ queryKey: ['episode-stats', episodeGuid] });
-      await queryClient.refetchQueries({ queryKey: ['episode-stats', episodeGuid] });
-    },
-    onError: (err: unknown) => {
-      setError(getHttpErrorInfo(err).message);
-    },
-  });
+  const actionsBusy =
+    saveMutation.isPending ||
+    recutMutation.isPending ||
+    improveAndRecutMutation.isPending ||
+    jingleMutation.isPending;
 
   const suggestedSnippet = suggestedPrompt?.snippet ?? null;
   const promptProgress =
@@ -484,10 +480,10 @@ export default function TranscriptCorrectionPanel({
           <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-left">
             <p className="text-sm text-indigo-900 mb-3">
               Check rows, or Shift+click a checkbox for a range, or edit start/end seconds
-              manually, then mark as ad or content while listening to the original audio. Mark
-              ad/content saves each span; click Recut audio once when finished to update the
-              processed MP3. You do not need Reprocess (that re-runs Whisper/LLM). Effective cuts
-              are highlighted in red.
+              manually, then mark as ad or content while listening to the original audio. When
+              finished, use Improve show prompt and recut audio to update the feed prompt and
+              processed MP3 in one step (or Recut audio only for cuts). You do not need Reprocess
+              (that re-runs Whisper/LLM). Effective cuts are highlighted in red.
             </p>
             {selectionSummary && (
               <p className="mb-3 flex flex-wrap items-center gap-3 text-sm font-medium text-indigo-800">
@@ -503,9 +499,9 @@ export default function TranscriptCorrectionPanel({
             )}
             {corrections.length > 0 && (
               <p className="text-sm text-indigo-800 mb-3">
-                {corrections.length} correction{corrections.length === 1 ? '' : 's'} saved — click
-                Recut audio to update the episode. The main player still plays the old MP3 until
-                you recut.
+                {corrections.length} correction{corrections.length === 1 ? '' : 's'} saved — the main
+                player still plays the old MP3 until you improve the prompt and recut (or recut
+                only).
               </p>
             )}
             {promptProgress && (
@@ -537,36 +533,13 @@ export default function TranscriptCorrectionPanel({
                   className="mt-1 block w-28 rounded border border-gray-300 px-2 py-1 text-sm"
                 />
               </label>
-              <label className="text-xs text-gray-700">
-                Reason
-                <select
-                  value={kind}
-                  onChange={(event) => setKind(event.target.value as CorrectionKind)}
-                  className="mt-1 block rounded border border-gray-300 px-2 py-1 text-sm"
-                >
-                  <option value="missed_ad">missed_ad</option>
-                  <option value="false_positive">false_positive</option>
-                  <option value="retime">retime</option>
-                </select>
-              </label>
-              <label className="text-xs text-gray-700">
-                Note
-                <input
-                  type="text"
-                  value={reason}
-                  onChange={(event) => setReason(event.target.value)}
-                  className="mt-1 block w-48 rounded border border-gray-300 px-2 py-1 text-sm"
-                  placeholder="optional"
-                />
-              </label>
               <button
                 type="button"
                 onClick={() => {
-                  setKind('missed_ad');
                   setStatus('Saving correction…');
                   saveMutation.mutate({ label: 'ad', correctionKind: 'missed_ad' });
                 }}
-                disabled={saveMutation.isPending || recutMutation.isPending}
+                disabled={actionsBusy}
                 className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {saveMutation.isPending ? 'Saving…' : 'Mark ad'}
@@ -574,12 +547,10 @@ export default function TranscriptCorrectionPanel({
               <button
                 type="button"
                 onClick={() => {
-                  const correctionKind = kind === 'missed_ad' ? 'false_positive' : kind;
-                  setKind(correctionKind);
                   setStatus('Saving correction…');
-                  saveMutation.mutate({ label: 'content', correctionKind });
+                  saveMutation.mutate({ label: 'content', correctionKind: 'false_positive' });
                 }}
-                disabled={saveMutation.isPending || recutMutation.isPending}
+                disabled={actionsBusy}
                 className="rounded bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
                 {saveMutation.isPending ? 'Saving…' : 'Mark content'}
@@ -590,26 +561,36 @@ export default function TranscriptCorrectionPanel({
                   setStatus('Saving jingle template…');
                   jingleMutation.mutate();
                 }}
-                disabled={
-                  saveMutation.isPending ||
-                  recutMutation.isPending ||
-                  jingleMutation.isPending ||
-                  !hasUnprocessedAudio
-                }
+                disabled={actionsBusy || !hasUnprocessedAudio}
                 className="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
               >
                 {jingleMutation.isPending ? 'Saving…' : 'Save as jingle template'}
               </button>
+              {corrections.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    improveAndRecutMutation.mutate();
+                  }}
+                  disabled={actionsBusy}
+                  className="rounded bg-amber-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-900 disabled:opacity-50"
+                >
+                  {improveAndRecutMutation.isPending
+                    ? 'Improving & recutting…'
+                    : 'Improve show prompt and recut audio'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
                   setStatus('Recutting processed audio…');
                   recutMutation.mutate();
                 }}
-                disabled={saveMutation.isPending || recutMutation.isPending}
+                disabled={actionsBusy}
                 className="rounded bg-indigo-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-800 disabled:opacity-50"
               >
-                {recutMutation.isPending ? 'Recutting…' : 'Recut audio'}
+                {recutMutation.isPending ? 'Recutting…' : 'Recut audio only'}
               </button>
             </div>
             <p className="mt-2 text-xs text-indigo-700 text-left">
@@ -624,7 +605,7 @@ export default function TranscriptCorrectionPanel({
                 <button
                   type="button"
                   onClick={() => recutMutation.mutate()}
-                  disabled={recutMutation.isPending}
+                  disabled={actionsBusy}
                   className="rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
                 >
                   Retry recut
@@ -774,67 +755,14 @@ export default function TranscriptCorrectionPanel({
 
         {corrections.length > 0 && (
           <div className="mt-4 text-left">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <h4 className="font-medium text-gray-900">
-                Saved corrections ({corrections.length})
-              </h4>
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStatus('Analyzing corrections for show prompt…');
-                    analyzePromptMutation.mutate();
-                  }}
-                  disabled={
-                    analyzePromptMutation.isPending ||
-                    acceptLearnedDraftMutation.isPending ||
-                    saveMutation.isPending
-                  }
-                  className="rounded bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
-                >
-                  {analyzePromptMutation.isPending
-                    ? 'Analyzing…'
-                    : 'Learn for show prompt'}
-                </button>
-              )}
-            </div>
-            {learnedDraft && canEdit && (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-left">
-                <p className="text-sm font-medium text-amber-900 mb-1">
-                  Draft show prompt from corrections
-                </p>
-                <p className="text-sm text-amber-800 mb-2 whitespace-pre-wrap">
-                  {learnedDraft}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => acceptLearnedDraftMutation.mutate()}
-                    disabled={acceptLearnedDraftMutation.isPending}
-                    className="rounded bg-amber-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
-                  >
-                    {acceptLearnedDraftMutation.isPending
-                      ? 'Appending…'
-                      : 'Append to feed prompt'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLearnedDraft(null);
-                      setLearnedExistingPrompt(null);
-                    }}
-                    disabled={acceptLearnedDraftMutation.isPending}
-                    className="rounded border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              </div>
-            )}
+            <h4 className="mb-2 font-medium text-gray-900">
+              Saved corrections ({corrections.length})
+            </h4>
             <ul className="space-y-1 text-sm text-gray-700">
               {corrections.map((correction) => (
                 <li key={correction.id}>
-                  [{correction.start_time}s-{correction.end_time}s] {correction.label.toUpperCase()} ({correction.kind})
+                  [{correction.start_time}s-{correction.end_time}s]{' '}
+                  {correction.label.toUpperCase()} ({correction.kind})
                   {correction.reason ? ` — ${correction.reason}` : ''}
                 </li>
               ))}

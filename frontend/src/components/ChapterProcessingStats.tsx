@@ -84,8 +84,8 @@ export default function ChapterProcessingStats({
       )}
 
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-stretch justify-stretch bg-black bg-opacity-50">
+          <div className="flex h-screen w-screen max-h-none max-w-none flex-col overflow-hidden bg-white">
             <div className="flex items-center justify-between p-6 border-b">
               <h2 className="text-xl font-bold text-gray-900 text-left">Processing Statistics & Debug</h2>
               <button
@@ -122,7 +122,7 @@ export default function ChapterProcessingStats({
               </nav>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
+            <div className="min-h-0 flex-1 overflow-y-auto p-6">
               {isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
