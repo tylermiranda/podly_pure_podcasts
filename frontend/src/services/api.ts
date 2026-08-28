@@ -344,6 +344,7 @@ export const feedsApi = {
       has_processed_audio: boolean;
       has_unprocessed_audio?: boolean;
       needs_recut?: boolean;
+      transcript_reviewed?: boolean;
     };
     ad_detection_strategy: 'llm' | 'chapter' | 'chapter_insert';
     processing_stats: {
@@ -519,6 +520,20 @@ export const feedsApi = {
   ): Promise<{ post_id: number; recut?: boolean; processed_audio_path?: string }> => {
     const response = await api.post(`/api/posts/${guid}/ad-corrections/apply`, undefined, {
       timeout: 600_000,
+    });
+    return response.data;
+  },
+
+  setTranscriptReviewed: async (
+    guid: string,
+    reviewed: boolean
+  ): Promise<{
+    post_id: number;
+    transcript_reviewed: boolean;
+    transcript_reviewed_at: string | null;
+  }> => {
+    const response = await api.post(`/api/posts/${guid}/transcript-reviewed`, {
+      reviewed,
     });
     return response.data;
   },

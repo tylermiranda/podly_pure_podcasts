@@ -286,6 +286,27 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
     },
   });
 
+  const transcriptReviewedMutation = useMutation({
+    mutationFn: ({ guid, reviewed }: { guid: string; reviewed: boolean }) =>
+      feedsApi.setTranscriptReviewed(guid, reviewed),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['episodes', currentFeed.id] });
+      toast.success(variables.reviewed ? 'Marked as reviewed' : 'Review cleared');
+    },
+    onError: (err) => {
+      const { status, data, message } = getHttpErrorInfo(err);
+      emitDiagnosticError({
+        title: 'Failed to update review status',
+        message,
+        kind: status ? 'http' : 'network',
+        details: {
+          status,
+          response: data,
+        },
+      });
+    },
+  });
+
   const bulkWhitelistMutation = useMutation({
     mutationFn: () => feedsApi.toggleAllPostsWhitelist(currentFeed.id),
     onSuccess: () => {
@@ -1163,6 +1184,33 @@ export default function FeedDetail({ feed, onClose, onFeedDeleted }: FeedDetailP
                                 <span>Disabled</span>
                               </>
                             )}
+                          </button>
+                          <span>•</span>
+                        </>
+                      )}
+                      {isAdmin && episode.has_processed_audio && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              transcriptReviewedMutation.mutate({
+                                guid: episode.guid,
+                                reviewed: !episode.transcript_reviewed,
+                              })
+                            }
+                            disabled={transcriptReviewedMutation.isPending}
+                            title={
+                              episode.transcript_reviewed
+                                ? 'Clear transcript review'
+                                : 'Mark transcript as reviewed'
+                            }
+                            className={`px-2 py-1 text-xs font-medium rounded-full transition-colors flex items-center justify-center gap-1 ${
+                              episode.transcript_reviewed
+                                ? 'bg-sky-100 text-sky-800 hover:bg-sky-200'
+                                : 'border border-gray-300 text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800'
+                            } ${transcriptReviewedMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            {episode.transcript_reviewed ? 'Reviewed' : 'Mark reviewed'}
                           </button>
                           <span>•</span>
                         </>

@@ -163,6 +163,8 @@ class Post(db.Model):  # type: ignore[name-defined, misc]
     refined_ad_boundaries = db.Column(db.JSON, nullable=True)
     refined_ad_boundaries_updated_at = db.Column(db.DateTime, nullable=True)
     ad_detection_debug = db.Column(db.JSON, nullable=True)
+    # Set when an admin finishes transcript/ad review (manual or via correction/recut).
+    transcript_reviewed_at = db.Column(db.DateTime, nullable=True)
 
     segments = db.relationship(
         "TranscriptSegment",

@@ -64,6 +64,10 @@ def _post_needs_recut(post: Post) -> bool:
     return processed_audio_needs_recut(post)
 
 
+def _post_transcript_reviewed(post: Post) -> bool:
+    return post.transcript_reviewed_at is not None
+
+
 def _serve_processed_audio_file(post: Post, p_guid: str) -> ResponseReturnValue:
     """Resolve and stream the processed MP3 for a post."""
     feed = db.session.get(Feed, post.feed_id)
@@ -225,6 +229,7 @@ def api_feed_posts(feed_id: int) -> flask.Response:
             "has_processed_audio": post.processed_audio_path is not None,
             "has_unprocessed_audio": post.unprocessed_audio_path is not None,
             "needs_recut": _post_needs_recut(post),
+            "transcript_reviewed": _post_transcript_reviewed(post),
             "download_url": post.download_url,
             "image_url": post.image_url,
             "download_count": post.download_count,
@@ -672,6 +677,7 @@ def api_post_stats(p_guid: str) -> flask.Response:
                 and Path(post.unprocessed_audio_path).is_file()
             ),
             "needs_recut": _post_needs_recut(post),
+            "transcript_reviewed": _post_transcript_reviewed(post),
             "download_count": post.download_count,
         },
         "ad_detection_strategy": ad_detection_strategy,
@@ -807,6 +813,44 @@ def api_apply_ad_corrections(p_guid: str) -> ResponseReturnValue:
     if recut_error:
         return flask.make_response(flask.jsonify({"error": recut_error}), 500)
     return flask.jsonify(apply_data or {})
+
+
+@post_bp.route("/api/posts/<string:p_guid>/transcript-reviewed", methods=["POST"])
+def api_set_transcript_reviewed(p_guid: str) -> ResponseReturnValue:
+    """Mark or clear transcript review for an episode (admin only)."""
+    post = Post.query.filter_by(guid=p_guid).first()
+    if post is None:
+        return flask.make_response(flask.jsonify({"error": "Post not found"}), 404)
+
+    _, error = require_admin("mark transcript review")
+    if error:
+        return error
+
+    payload = request.get_json(silent=True) or {}
+    reviewed = payload.get("reviewed")
+    if not isinstance(reviewed, bool):
+        return flask.make_response(
+            flask.jsonify({"error": "reviewed must be a boolean"}),
+            400,
+        )
+
+    result = writer_client.action(
+        "set_post_transcript_reviewed",
+        {"post_id": post.id, "reviewed": reviewed},
+        wait=True,
+    )
+    if not result or not result.success:
+        return flask.make_response(
+            flask.jsonify(
+                {
+                    "error": getattr(
+                        result, "error", "Failed to update transcript review"
+                    )
+                }
+            ),
+            400,
+        )
+    return flask.jsonify(result.data or {})
 
 
 @post_bp.route(
@@ -1385,6 +1429,21 @@ def _recut_post_in_request(post: Post) -> tuple[dict[str, Any] | None, str | Non
     if not isinstance(apply_data, dict):
         apply_data = {}
     apply_data["recut"] = True
+
+    review_result = writer_client.action(
+        "set_post_transcript_reviewed",
+        {"post_id": post.id, "reviewed": True},
+        wait=True,
+    )
+    if not review_result or not review_result.success:
+        logger.warning(
+            "Recut succeeded but failed to mark transcript reviewed for post %s: %s",
+            post.guid,
+            getattr(review_result, "error", None),
+        )
+    else:
+        apply_data["transcript_reviewed"] = True
+
     return apply_data, None
 
 

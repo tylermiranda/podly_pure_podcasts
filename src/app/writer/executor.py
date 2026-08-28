@@ -163,6 +163,10 @@ class CommandExecutor:
             writer_actions.mark_ad_corrections_stale_action,
         )
         self.register_action(
+            "set_post_transcript_reviewed",
+            writer_actions.set_post_transcript_reviewed_action,
+        )
+        self.register_action(
             "upsert_jingle_template",
             writer_actions.upsert_jingle_template_action,
         )

@@ -466,11 +466,40 @@ def insert_ad_correction_action(params: dict[str, Any]) -> dict[str, Any]:
             # Creative index must not fail correction saves.
             pass
 
+    post.transcript_reviewed_at = datetime.now(UTC).replace(tzinfo=None)
+
     return {
         "id": int(correction.id),
         "post_id": post.id,
         "start_time": float(correction.start_time),
         "end_time": float(correction.end_time),
+    }
+
+
+def set_post_transcript_reviewed_action(params: dict[str, Any]) -> dict[str, Any]:
+    """Mark or clear transcript review for a post."""
+    post_id = params.get("post_id")
+    if post_id is None:
+        raise ValueError("post_id is required")
+    post = db.session.get(Post, int(post_id))
+    if post is None:
+        raise ValueError(f"Post {post_id} not found")
+
+    reviewed = params.get("reviewed")
+    if not isinstance(reviewed, bool):
+        raise ValueError("reviewed must be a boolean")
+
+    post.transcript_reviewed_at = (
+        datetime.now(UTC).replace(tzinfo=None) if reviewed else None
+    )
+    return {
+        "post_id": post.id,
+        "transcript_reviewed": reviewed,
+        "transcript_reviewed_at": (
+            post.transcript_reviewed_at.isoformat()
+            if post.transcript_reviewed_at is not None
+            else None
+        ),
     }
 
 

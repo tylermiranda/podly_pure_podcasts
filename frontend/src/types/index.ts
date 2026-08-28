@@ -53,6 +53,7 @@ export interface Episode {
   has_processed_audio: boolean;
   has_unprocessed_audio: boolean;
   needs_recut?: boolean;
+  transcript_reviewed?: boolean;
   download_url: string;
   image_url: string | null;
   download_count: number;

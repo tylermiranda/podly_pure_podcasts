@@ -54,6 +54,9 @@ from .processor import (
 from .processor import mark_model_call_failed_action as mark_model_call_failed_action
 from .processor import replace_identifications_action as replace_identifications_action
 from .processor import replace_transcription_action as replace_transcription_action
+from .processor import (
+    set_post_transcript_reviewed_action as set_post_transcript_reviewed_action,
+)
 from .processor import upsert_jingle_template_action as upsert_jingle_template_action
 from .processor import upsert_model_call_action as upsert_model_call_action
 from .processor import (

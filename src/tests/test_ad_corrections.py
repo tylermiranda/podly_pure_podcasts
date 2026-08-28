@@ -17,7 +17,10 @@ from app.writer.actions.cleanup import (
     clear_post_processing_data_action,
     clear_post_processing_data_keep_transcript_action,
 )
-from app.writer.actions.processor import insert_ad_correction_action
+from app.writer.actions.processor import (
+    insert_ad_correction_action,
+    set_post_transcript_reviewed_action,
+)
 from podcast_processor.ad_corrections import (
     analyze_corrections_for_prompt,
     build_analyze_prompt_messages,
@@ -923,3 +926,168 @@ def test_analyze_prompt_route_empty_corrections_returns_400(app) -> None:
     response = client.post(f"/api/posts/{guid}/ad-corrections/analyze-prompt")
     assert response.status_code == 400
     assert "No saved corrections" in response.get_json()["error"]
+
+
+def test_insert_ad_correction_sets_transcript_reviewed(app) -> None:
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-reviewed-insert",
+            rss_url="https://example.com/corr-reviewed-insert.xml",
+        )
+        db.session.add(
+            TranscriptSegment(
+                post_id=post.id,
+                sequence_num=0,
+                start_time=0.0,
+                end_time=5.0,
+                text="hello world",
+            )
+        )
+        db.session.commit()
+        assert post.transcript_reviewed_at is None
+
+        insert_ad_correction_action(
+            {
+                "post_id": post.id,
+                "label": "content",
+                "kind": "false_positive",
+                "start_time": 0.0,
+                "end_time": 5.0,
+            }
+        )
+        db.session.commit()
+        db.session.refresh(post)
+        assert post.transcript_reviewed_at is not None
+
+
+def test_set_transcript_reviewed_action_and_route(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-reviewed-manual",
+            rss_url="https://example.com/corr-reviewed-manual.xml",
+        )
+        post_id = post.id
+        guid = post.guid
+
+        result = set_post_transcript_reviewed_action(
+            {"post_id": post_id, "reviewed": True}
+        )
+        db.session.commit()
+        assert result["transcript_reviewed"] is True
+        db.session.refresh(post)
+        assert post.transcript_reviewed_at is not None
+
+    client = app.test_client()
+    response = client.post(
+        f"/api/posts/{guid}/transcript-reviewed",
+        json={"reviewed": False},
+    )
+    assert response.status_code == 200
+    assert response.get_json()["transcript_reviewed"] is False
+
+    with app.app_context():
+        cleared = db.session.get(Post, post_id)
+        assert cleared is not None
+        assert cleared.transcript_reviewed_at is None
+
+    bad = client.post(f"/api/posts/{guid}/transcript-reviewed", json={})
+    assert bad.status_code == 400
+
+
+def test_recut_marks_transcript_reviewed(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-reviewed-recut",
+            rss_url="https://example.com/corr-reviewed-recut.xml",
+        )
+        db.session.add(
+            TranscriptSegment(
+                post_id=post.id,
+                sequence_num=0,
+                start_time=1.0,
+                end_time=8.0,
+                text="sponsor pitch",
+            )
+        )
+        db.session.commit()
+        guid = post.guid
+        post_id = post.id
+
+    client = app.test_client()
+    with mock.patch(
+        "podcast_processor.ad_corrections.recut_post_audio",
+        return_value={"post_id": post_id, "recut": True},
+    ):
+        response = client.post(
+            f"/api/posts/{guid}/ad-corrections",
+            json={
+                "label": "ad",
+                "kind": "missed_ad",
+                "start_time": 1.0,
+                "end_time": 8.0,
+                "apply": True,
+            },
+        )
+    assert response.status_code == 200
+    assert response.get_json()["apply"]["transcript_reviewed"] is True
+
+    with app.app_context():
+        reviewed = db.session.get(Post, post_id)
+        assert reviewed is not None
+        assert reviewed.transcript_reviewed_at is not None
+
+
+def test_clear_processing_clears_transcript_reviewed(app) -> None:
+    with app.app_context():
+        _feed, post = _make_feed_post(
+            app,
+            guid="corr-reviewed-clear",
+            rss_url="https://example.com/corr-reviewed-clear.xml",
+        )
+        post.transcript_reviewed_at = datetime.now(UTC).replace(tzinfo=None)
+        post.processed_audio_path = "/tmp/fake.mp3"
+        db.session.commit()
+        post_id = post.id
+
+        clear_post_processing_data_action({"post_id": post_id})
+        db.session.commit()
+        cleared = db.session.get(Post, post_id)
+        assert cleared is not None
+        assert cleared.transcript_reviewed_at is None
+
+        cleared.transcript_reviewed_at = datetime.now(UTC).replace(tzinfo=None)
+        db.session.commit()
+        clear_post_processing_data_keep_transcript_action({"post_id": post_id})
+        db.session.commit()
+        cleared_keep = db.session.get(Post, post_id)
+        assert cleared_keep is not None
+        assert cleared_keep.transcript_reviewed_at is None
+
+
+def test_feed_posts_list_includes_transcript_reviewed(app) -> None:
+    app.testing = True
+    app.register_blueprint(post_bp)
+    with app.app_context():
+        feed, post = _make_feed_post(
+            app,
+            guid="corr-reviewed-list",
+            rss_url="https://example.com/corr-reviewed-list.xml",
+        )
+        post.transcript_reviewed_at = datetime.now(UTC).replace(tzinfo=None)
+        db.session.commit()
+        feed_id = feed.id
+
+    client = app.test_client()
+    response = client.get(f"/api/feeds/{feed_id}/posts")
+    assert response.status_code == 200
+    items = response.get_json()["items"]
+    assert len(items) == 1
+    assert items[0]["transcript_reviewed"] is True
+    assert items[0]["guid"] == "corr-reviewed-list"
