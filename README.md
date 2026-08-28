@@ -34,6 +34,7 @@ ghcr.io/tylermiranda/podly-pure-podcasts:main-latest
 | **Migrations** | Merges Alembic dual heads so existing DBs can upgrade (upstream [#234](https://github.com/podly-pure-podcasts/podly_pure_podcasts/issues/234)). |
 | **Custom ad prompt** | Per-feed **Custom Ad Detection Instructions** in Feed Settings (`custom_llm_ad_prompt`), appended to the LLM system prompt during classification. |
 | **Prompt tags** | Reusable prompt templates (e.g. `noiser`) managed under **Config → Prompt Tags** (also Feed Settings / Add Feed → Manage tags). Assign one tag per feed at add time or in settings; composition is `base → tag.prompt → per-feed custom`. |
+| **Auto prompt tag on add** | When a **new** feed is added (and an LLM is configured), Podly researches RSS metadata, a directory lookup, and the show website (SSRF-safe), then **creates or reuses** a prompt tag and assigns it to the feed. Toggle under **Config → Advanced → Ad detection** (`auto_generate_prompt_tag`, on by default). **Generate with AI** in Feed Settings re-runs research and assignment (`force` overwrites an existing tag assignment). |
 | **Cut defaults** | New installs / reset defaults: `fade_ms=0` (was 3000), `min_ad_segment_length_seconds=5` (was 14), `min_confidence=0.7` (was 0.8). Existing DB values are unchanged until you update Output settings. |
 | **Client poll freshness** | Feed list shows `Last fetched … via {client}` from the podcast app User-Agent that last requested the Podly RSS URL. |
 | **Upstream freshness** | `last_fetched_at` (Podly → publisher RSS) is shown on the feed detail pane as `Upstream RSS refreshed …`. |
@@ -86,7 +87,9 @@ You do **not** need **Reprocess** (Whisper/LLM) for these fixes. Effective cuts 
 
 <p align="center"><em>Assign one tag per feed in <strong>Feed Settings</strong>; optional per-feed custom instructions append after the tag prompt.</em></p>
 
-Create tags once under **Config → Default → Prompt Tags** (or **Manage tags** from Feed Settings / Add Feed), then assign **one tag per feed**. At classify time Podly builds the LLM instructions as:
+Create tags once under **Config → Default → Prompt Tags** (or **Manage tags** from Feed Settings / Add Feed), then assign **one tag per feed**. When you add a new podcast, Podly can **auto-generate** a tag: it looks up the show, drafts network/format ad rules with the LLM, reuses an existing tag name when appropriate (e.g. `npr`, `wondery`), and assigns `prompt_tag_id` on the feed. Use **Generate with AI** in Feed Settings to run the same flow manually.
+
+At classify time Podly builds the LLM instructions as:
 
 ```text
 [global base ad-detection prompt]
@@ -132,6 +135,10 @@ curl -X POST "$PODLY/api/tags" -H 'Content-Type: application/json' \
 # Assign to a feed
 curl -X PATCH "$PODLY/api/feeds/16/settings" -H 'Content-Type: application/json' \
   -d '{"prompt_tag_id":3}'
+
+# Auto-generate / regenerate prompt tag for a feed (admin)
+curl -X POST "$PODLY/api/feeds/16/generate-prompt-tag" -H 'Content-Type: application/json' \
+  -d '{"force":true}'
 ```
 
 ## How To Run
